@@ -22,4 +22,4 @@ This document has the following main sections:
 - Example Sketches
 - Alphabetical index of Application Interface functions
 
-Read more: [emonLibCM User Doc.pdf](emonLibCM User Doc.pdf)
+Read more: [emonLibCM User Doc.pdf](emonLibCM%20User%20Doc.pdf)
