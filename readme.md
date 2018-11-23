@@ -8,6 +8,8 @@ The following release notes are copied from the forum thread. The installation s
 
 ---
 
+**EmonLibCM Release notes**
+
 EmonLibCM is a Continuous Monitoring alternative to EmonLib. Whereas emonLib repeats, every 5 or 10 s, a sequence of voltage and current measurements in each of the input channels for a short period, normally 200 ms, and then reports the measurements back to the sketch for onwards transmission to (for example) emonCMS; emonLibCM continuously measures in the background the voltage and all the current input channels in turn, calculates a true average quantity for each and then informs the sketch that the measurements are available and should be read and processed.
 
 Temperature measurement with up to 6 DS18B20 sensors, and pulse counting, is included in the library. Neither must be added separately in the sketch.
@@ -17,18 +19,6 @@ The CM library will always give an accurate measurement of the average over the 
 The inputs can be calibrated for any realistic voltage and current, the default calibration is for an emonTx with a UK a.c. adapter and 100 A : 50 mA current transformers.
 
 The library is distributed by @Robert.Wall as a compressed Zip file in the forum thread above. This contains the library files themselves (emonLibCM.cpp & emonLibCM.h), two directories with example sketches and a PDF format User Documentation file that contains notes on using the library, a full description of each method, instructions both for setting the initial configuration and for calibration, and brief notes explaining the example sketches. EmonLibCM also depends on several other libraries, and these are listed.
-
-**INSTALLING THE LIBRARY (GitHub)**
-
-Navigate to your Arduino libraries directory and clone this repository:
-
-    git clone https://github.com/openenergymonitor/EmonLibCM.git
-    
-Reload Arduino to start using the library.
-
-The User Documentation is available as a markdown document here:
-
-[emonLibCM User Documentation](emonLibCM_User_Doc.md)
 
 **INSTALLING THE LIBRARY (Forum thread Zip file)**
 
@@ -42,6 +32,19 @@ The User Documentation PDF file can be moved or copied to a convenient location 
 
 
 Robert Wall will post updates on the forum thread first.
+
+
+**INSTALLING THE LIBRARY (GitHub)**
+
+Navigate to your Arduino libraries directory and clone this repository:
+
+    git clone https://github.com/openenergymonitor/EmonLibCM.git
+    
+Reload Arduino to start using the library.
+
+The User Documentation is available as a markdown document here:
+
+[emonLibCM User Documentation](emonLibCM_User_Doc.md)
 
 **CHANGES**
 This version corrects some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.
