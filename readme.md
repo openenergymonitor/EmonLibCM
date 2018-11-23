@@ -41,10 +41,6 @@ Navigate to your Arduino libraries directory and clone this repository:
     
 Reload Arduino to start using the library.
 
-The User Documentation is available as a markdown document here:
-
-[emonLibCM User Documentation](emonLibCM_User_Doc.md)
-
 ---
 
 **CHANGES**<br>
