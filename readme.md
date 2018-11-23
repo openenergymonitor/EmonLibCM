@@ -60,7 +60,7 @@ The example sketches are intended only as a demonstration of the library. They d
 
 &nbsp;
 
-**Acknowledgements.**
+**Acknowledgements.**<br>
 Jörg Becker (@joergbecker32) for his background work on interrupts and the ADC.<br>
 Robin Emley (@calypso_rae) for his energy diverter software, from which the major part of the library was derived by @TrystanLea<br> 
 @ursi (Andries) and @mafheldt (Mike Afheldt) for suggestions made at https://community.openenergymonitor.org/t/emonlib-inaccurate-power-factor/3790 and https://community.openenergymonitor.org/t/rms-calculations-in-emonlib-and-learn-documentation/3749/3
