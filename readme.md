@@ -20,6 +20,8 @@ The inputs can be calibrated for any realistic voltage and current, the default 
 
 The library is distributed by @Robert.Wall as a compressed Zip file in the forum thread above. This contains the library files themselves (emonLibCM.cpp & emonLibCM.h), two directories with example sketches and a PDF format User Documentation file that contains notes on using the library, a full description of each method, instructions both for setting the initial configuration and for calibration, and brief notes explaining the example sketches. EmonLibCM also depends on several other libraries, and these are listed.
 
+---
+
 **INSTALLING THE LIBRARY (Forum thread Zip file)**
 
 The directory emonLibCM together with its contents should be extracted from the zip file and copied into the "libraries" directory, alongside (in the same level of the hierarchy as) the emonLib directory.
@@ -45,6 +47,8 @@ Reload Arduino to start using the library.
 The User Documentation is available as a markdown document here:
 
 [emonLibCM User Documentation](emonLibCM_User_Doc.md)
+
+---
 
 **CHANGES**<br>
 This version corrects some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.
