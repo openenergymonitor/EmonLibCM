@@ -8,8 +8,7 @@ The following release notes are copied from the forum thread. The installation s
 
 ---
 
-**EmonLibCM Release notes**
-
+**EmonLibCM Release notes**<br>
 EmonLibCM is a Continuous Monitoring alternative to EmonLib. Whereas emonLib repeats, every 5 or 10 s, a sequence of voltage and current measurements in each of the input channels for a short period, normally 200 ms, and then reports the measurements back to the sketch for onwards transmission to (for example) emonCMS; emonLibCM continuously measures in the background the voltage and all the current input channels in turn, calculates a true average quantity for each and then informs the sketch that the measurements are available and should be read and processed.
 
 Temperature measurement with up to 6 DS18B20 sensors, and pulse counting, is included in the library. Neither must be added separately in the sketch.
@@ -22,8 +21,7 @@ The library is distributed by @Robert.Wall as a compressed Zip file in the forum
 
 ---
 
-**INSTALLING THE LIBRARY (Forum thread Zip file)**
-
+**INSTALLING THE LIBRARY (Forum thread Zip file)**<br>
 The directory emonLibCM together with its contents should be extracted from the zip file and copied into the "libraries" directory, alongside (in the same level of the hierarchy as) the emonLib directory.
 
 If you wish to use the example sketches, these (in their respective directories) should be moved or copied into your Sketchbook.
@@ -36,8 +34,7 @@ The User Documentation PDF file can be moved or copied to a convenient location 
 Robert Wall will post updates on the forum thread first.
 
 
-**INSTALLING THE LIBRARY (GitHub)**
-
+**INSTALLING THE LIBRARY (GitHub)**<br>
 Navigate to your Arduino libraries directory and clone this repository:
 
     git clone https://github.com/openenergymonitor/EmonLibCM.git
