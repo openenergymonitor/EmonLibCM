@@ -46,10 +46,10 @@ The User Documentation is available as a markdown document here:
 
 [emonLibCM User Documentation](emonLibCM_User_Doc.md)
 
-**CHANGES**
+**CHANGES**<br>
 This version corrects some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.
 
-**USING THE LIBRARY**
+**USING THE LIBRARY**<br>
 Two example sketches are provided as part of the distribution:
 
 **EmonTxV34CM_min** is the absolute minimum sketch required to exercise the library and produce meaningful values.
