@@ -61,8 +61,8 @@ The example sketches are intended only as a demonstration of the library. They d
 &nbsp;
 
 **Acknowledgements.**
-Jörg Becker (@joergbecker32) for his background work on interrupts and the ADC.
-Robin Emley (@calypso_rae) for his energy diverter software, from which the major part of the library was derived by @TrystanLea 
+Jörg Becker (@joergbecker32) for his background work on interrupts and the ADC.<br>
+Robin Emley (@calypso_rae) for his energy diverter software, from which the major part of the library was derived by @TrystanLea<br> 
 @ursi (Andries) and @mafheldt (Mike Afheldt) for suggestions made at https://community.openenergymonitor.org/t/emonlib-inaccurate-power-factor/3790 and https://community.openenergymonitor.org/t/rms-calculations-in-emonlib-and-learn-documentation/3749/3
 
 &nbsp;
@@ -71,7 +71,6 @@ Robin Emley (@calypso_rae) for his energy diverter software, from which the majo
 <th>MD5 Hashes:</th><th>&nbsp;</th>
 <tr><td>EmonLibCM.cpp</td><td>220c1a58553543dd1ed92203eceab77a</td></tr>
 <tr><td>EmonLibCM.h</td><td> adcdfc3f940812a2d7cd3d1f96781df0</td></tr>
-<tr><td>&nbsp;</td></tr>
 <tr><td>emonLibCM User Doc.pdf</td><td>9e1d72a8450ff76272d1f44851a65013</td></tr>
 </table>
 
