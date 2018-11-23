@@ -5,6 +5,7 @@ The EmonLibCM library is maintained by @Robert.Wall and mirrored here for users 
 See forum release: [EmonLibCM - Version 2](https://community.openenergymonitor.org/t/emonlibcm-version-2/9241)
 
 The following release notes are copied from the forum thread. The installation section is modified to reflect git command line installation.
+
 ---
 
 EmonLibCM is a Continuous Monitoring alternative to EmonLib. Whereas emonLib repeats, every 5 or 10 s, a sequence of voltage and current measurements in each of the input channels for a short period, normally 200 ms, and then reports the measurements back to the sketch for onwards transmission to (for example) emonCMS; emonLibCM continuously measures in the background the voltage and all the current input channels in turn, calculates a true average quantity for each and then informs the sketch that the measurements are available and should be read and processed.
