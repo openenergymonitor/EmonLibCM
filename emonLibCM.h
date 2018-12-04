@@ -1,5 +1,5 @@
 /*
-  EmonLibCM.h - Library for openenergymonitor
+  emonLibCM.h - Library for openenergymonitor
   GNU GPL
 */
 
@@ -17,6 +17,7 @@
 //  Release for testing 4/1/2017
 //
 // Version 2.0  21/11/2018
+// Version 2.01  3/12/2018  No change.
 
 
 #ifndef EmonLibCM_h

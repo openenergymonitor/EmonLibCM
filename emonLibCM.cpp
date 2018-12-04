@@ -1,4 +1,4 @@
-// EmonLibCM.cpp - Library for openenergymonitor
+// emonLibCM.cpp - Library for openenergymonitor
 // GNU GPL
 
 // This library provides continuous single-phase monitoring of real power on up to five CT channels.
@@ -15,6 +15,7 @@
 //  Release for testing 4/1/2017
 //
 // Version 2.0  21/11/2018
+// Version 2.01  3/12/2018  Calculation error in phase error correction - const.'360' missing, 'x' & 'y' coefficients swapped.
 
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
@@ -22,7 +23,7 @@
 // #define SAMPPIN 5           // Preferred pin for testing. This MUST be commented out if a temperature sensor is connected. Only include for testing.
 // #define SAMPPIN 19          // Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 
-#include "EmonLibCM.h"
+#include "emonLibCM.h"
 
 #if defined(ARDUINO) && ARDUINO >= 100
 
@@ -359,8 +360,6 @@ int EmonLibCM_minSampleSetsDuringThisMainsCycle(void)
 
 void EmonLibCM_Init(void)
 {   
-    const double two_pi = 6.2831853;
-    double sampleRate = ADCDuration * (no_of_channels + 1) * cycles_per_second * two_pi / MICROSPERSEC; // in radians
     // Set number of channels to the number defined, else use the defaults
     if (no_of_Iinputs)
     { 
@@ -369,6 +368,9 @@ void EmonLibCM_Init(void)
             ChannelInUse[i] = false;
     }
  
+    const double two_pi = 6.2831853;
+    double sampleRate = ADCDuration * (no_of_channels + 1) * two_pi * cycles_per_second / MICROSPERSEC; // in radians
+
     // Set up voltage calibration to take account of ADC width etc
     voltageCal = voltageCal * Vref / ADC_Counts;
     
@@ -383,8 +385,8 @@ void EmonLibCM_Init(void)
         //  the voltage, then convert to radians.
         // x & y are the constants used in the power interpolation. (Sanity check: x + y ≈ 1)
         
-        double phase_shift = ((double)phaseCal_CT[i] + (double)ADC_Sequence[i] * ADCDuration
-                               * cycles_per_second/MICROSPERSEC) * two_pi / 360.0 ;                   // Total phase shift in radians
+        double phase_shift = (phaseCal_CT[i] / 360.0 + ADC_Sequence[i+1] * 
+                               (double)ADCDuration * cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
         y[i] = sin(phase_shift) / sin(sampleRate);        
         x[i] = cos(phase_shift) - y[i] * cos(sampleRate);
     
@@ -914,8 +916,8 @@ void EmonLibCM_interrupt()
         sampleI_minusDC = lastRawSample[sample_index-1];
               
         // calculate the "partial real powers" in this sample pair and add to the accumulated sums - fine d.c. offsets are still present
-        sumPA_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power A
-        sumPB_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power B
+        sumPA_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power A
+        sumPB_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power B
           
         // for Irms calculation 
         sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
