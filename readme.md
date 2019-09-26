@@ -2,7 +2,7 @@
 
 The EmonLibCM library is maintained by @Robert.Wall and mirrored here for users of github.
 
-See forum release: [EmonLibCM - Version 2](https://community.openenergymonitor.org/t/emonlibcm-version-2/9241)
+See forum release: [EmonLibCM - Version 2.02](https://community.openenergymonitor.org/t/emonlibcm-version-2-02/9241)
 
 The following release notes are copied from the forum thread. The installation section is modified to reflect git command line installation.
 
@@ -28,7 +28,7 @@ If you wish to use the example sketches, these (in their respective directories)
 
 The User Documentation PDF file can be moved or copied to a convenient location of your choosing.
 
-<a class="attachment" href="https://community.openenergymonitor.org/uploads/default/original/2X/1/13d1b24912cbd3ce1f6f615c919904981a511688.zip">emonLibCM.zip</a> (Version 2: 125.5 KB)
+<a class="attachment" href="https://community.openenergymonitor.org/uploads/short-url/gofCd2DlmCWduHrhNRDPpBtxQeQ.zip">emonLibCM.zip</a> (Version 2: 130.2 KB)
 
 
 Robert Wall will post updates on the forum thread first.
@@ -44,15 +44,17 @@ Reload Arduino to start using the library.
 ---
 
 **CHANGES**<br>
-This version corrects some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.
+Version 2.0 corrected some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.
+Changes for V2.01: Errors in phase error correction.
+Changes for V2.02: Temperature measurement: Added “BAD_TEMPERATURE” return value when reporting period < 0.2 s, getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory, pulse & temperatures were set/enabled only at startup, setTemperatureDataPin was ineffective, preloaded sensor addresses were not handled properly.
 
 **USING THE LIBRARY**<br>
 Two example sketches are provided as part of the distribution:
 
 **EmonTxV34CM_min** is the absolute minimum sketch required to exercise the library and produce meaningful values.
 
-**EmonTxV34CM_max** gives an example of every API call available. However, as distributed, it actually changes nothing as everything is again given the default value. If you need to change one of the defaults, then only the API call that sets that value is needed, and you can copy and add that call to the "minimum' demo sketch.
-The EmonLibCM library is not a direct replacement for the 'discrete sample' library emonLib. Significant changes will be need to be made if emonLibCM is to replace emonLib in any particular sketch.
+**EmonTxV34CM_max** gives an example of every API call available. However, as distributed, it actually changes nothing as everything is again given the default value. If you need to change one of the defaults, then only the API call that sets that value is needed, and you can copy and add that call to the "minimum’ demo sketch.
+The EmonLibCM library is not a direct replacement for the ‘discrete sample’ library emonLib. Significant changes will be need to be made if emonLibCM is to replace emonLib in any particular sketch.
 The example sketches are intended only as a demonstration of the library. They do not (for example) take any account of the DIP switch settings of the emonTx V3.4. Great care must be taken if any significant additional load is to be put on the processor.
 
 &nbsp;
@@ -66,9 +68,9 @@ Robin Emley (@calypso_rae) for his energy diverter software, from which the majo
 
 <table>
 <th>MD5 Hashes:</th><th>&nbsp;</th>
-<tr><td>EmonLibCM.cpp</td><td>220c1a58553543dd1ed92203eceab77a</td></tr>
-<tr><td>EmonLibCM.h</td><td> adcdfc3f940812a2d7cd3d1f96781df0</td></tr>
-<tr><td>emonLibCM User Doc.pdf</td><td>9e1d72a8450ff76272d1f44851a65013</td></tr>
+<tr><td>EmonLibCM.cpp</td><td>9dd796794a90eab858a8dea60fdc2389</td></tr>
+<tr><td>EmonLibCM.h</td><td> db208228f62bc5f804569e70efbcee63</td></tr>
+<tr><td>emonLibCM User Doc.pdf</td><td>b7ed8b6f7004d0c9de38089c20695026</td></tr>
 </table>
 
 Please see [https://community.openenergymonitor.org/t/emonlibcm-version-2-support/9242?u=robert.wall](https://community.openenergymonitor.org/t/emonlibcm-version-2-support/9242?u=robert.wall) to comment or request support.

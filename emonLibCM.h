@@ -18,6 +18,9 @@
 //
 // Version 2.0  21/11/2018
 // Version 2.01  3/12/2018  No change.
+// Version 2.02 13/07/2019  getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
+                              
+
 
 
 #ifndef EmonLibCM_h
@@ -45,9 +48,6 @@
 #define UNUSED_TEMPERATURE 30000     // this value (300C) is sent if no sensor has ever been detected
 #define OUTOFRANGE_TEMPERATURE 30200 // this value (302C) is sent if the sensor reports < -55C or > +125C
 #define BAD_TEMPERATURE 30400        // this value (304C) is sent if no sensor is present or the checksum is bad (corrupted data)
-// NOTE: The sensor might report 85C if the temperature is retrieved but the sensor has not been commanded
-
-
                                      // NOTE: The sensor might report 85C if the temperature is retrieved but the sensor has not been commanded
                                      //  to measure the temperature.
 
@@ -66,12 +66,17 @@ void EmonLibCM_setADC(int _ADCBits,  int ADCDuration);
 void EmonLibCM_ADCCal(double _RefVoltage);
 void EmonLibCM_SetADC_VChannel(byte ADC_Input, double _amplitudeCal);
 void EmonLibCM_SetADC_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal);
+void EmonLibCM_ReCalibrate_VChannel(double _amplitudeCal);
+void EmonLibCM_ReCalibrate_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal);
 
 void EmonLibCM_setPulseEnable(bool _enable);
+void EmonLibCM_setPulsePin(int _pin);
 void EmonLibCM_setPulsePin(int _pin, int _interrupt);
 void EmonLibCM_setPulseMinPeriod(int _periodwidth);
 
 bool EmonLibCM_acPresent(void);
+
+int EmonLibCM_getLogicalChannel(byte ADC_Input);
 int EmonLibCM_getRealPower(int channel);
 int EmonLibCM_getApparentPower(int channel);
 double EmonLibCM_getPF(int channel);

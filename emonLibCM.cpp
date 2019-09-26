@@ -1,5 +1,7 @@
-// emonLibCM.cpp - Library for openenergymonitor
-// GNU GPL
+/*
+  emonLibCM.cpp - Library for openenergymonitor
+  GNU GPL
+*/
 
 // This library provides continuous single-phase monitoring of real power on up to five CT channels.
 // All of the time-critical code is now contained within the ISR, only the slower activities
@@ -16,11 +18,16 @@
 //
 // Version 2.0  21/11/2018
 // Version 2.01  3/12/2018  Calculation error in phase error correction - const.'360' missing, 'x' & 'y' coefficients swapped.
+// Version 2.02 13/07/2019  Temperature measurement: Added "BAD_TEMPERATURE" return value when reporting period < 0.2 s, 
+//                            getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
+//                            pulse & temperatures were set/enabled only at startup, setTemperatureDataPin was ineffective, preloaded sensor addresses
+//                            not handled properly.
+//
 
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
 
-// #define SAMPPIN 5           // Preferred pin for testing. This MUST be commented out if a temperature sensor is connected. Only include for testing.
+// #define SAMPPIN 5           // Preferred pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define SAMPPIN 19          // Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 
 #include "emonLibCM.h"
@@ -70,7 +77,7 @@ long wh_CT[max_no_of_channels];
 double pf[max_no_of_channels];
 double Vrms;
 volatile boolean ChannelInUse[max_no_of_channels];
-
+static byte lChannel[max_no_of_channels+1];
     
 // analogue ports
 static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5};        // <-- Sequence in which the analogue ports are scanned, first is Voltage, remainder are currents
@@ -81,11 +88,12 @@ int ADCDuration = 104;                                                 // Time i
 
 // Pulse Counting;
 bool PulseEnabled = false;
+bool PulseChange = false;                                              // track change of state of counting
 byte PulsePin = 3;                                                     // default to DI3 for the emonTx V3
 byte PulseInterrupt = 1;                                               // default to int1 for the emonTx V3
 unsigned long PulseMinPeriod = 110;                                    // default to 110 ms
 unsigned long pulseCount = 0;                                          // Total number of pulses from switch-on 
-volatile unsigned long pulses= 0;                                      // Incremental number of pulses between readings
+volatile unsigned long pulses = 0;                                     // Incremental number of pulses between readings
 unsigned long pulseTime;                                               // Instant of the last pulse - used for debounce logic
 void onPulse();                                                        // pulse time of arrival
 
@@ -167,8 +175,6 @@ double voltageCal = 268.97;
 
 unsigned int ADC_Counts = 1 << ADCBits;
 
-static const byte startUpPeriod = 3;                // in seconds, to allow inputs to settle
-
 bool stop = false;
 bool firstcycle = true;
     
@@ -231,6 +237,7 @@ byte numSensors = 0;
 byte temperatureResolution = TEMPRES_11;
 byte temperatureMaxCount = 1;
 DeviceAddress *temperatureSensors = NULL;
+bool keepAddresses = false;
 int *temperatures = NULL;
 unsigned int temperatureConversionDelayTime; 
 unsigned long temperatureConversionDelaySamples;
@@ -256,13 +263,36 @@ void EmonLibCM_SetADC_IChannel(byte ADC_Input, double _amplitudeCal, double _pha
     currentCal[no_of_Iinputs] = _amplitudeCal;
     phaseCal_CT[no_of_Iinputs] = _phaseCal;
     ChannelInUse[no_of_Iinputs] = true;            
+    lChannel[ADC_Input] = no_of_Iinputs;
     ADC_Sequence[++no_of_Iinputs] = ADC_Input; 
+}
+
+void EmonLibCM_ReCalibrate_VChannel(double _amplitudeCal)
+{
+    voltageCal = _amplitudeCal * Vref / ADC_Counts;
+}
+
+void EmonLibCM_ReCalibrate_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal)
+{
+    const double two_pi = 6.2831853;
+    double sampleRate = ADCDuration * (no_of_channels + 1) * two_pi * cycles_per_second / MICROSPERSEC; // in radians
+    byte lChannel = EmonLibCM_getLogicalChannel(ADC_Input);
+    currentCal[lChannel] = _amplitudeCal * Vref / ADC_Counts;  
+    phaseCal_CT[lChannel] = _phaseCal;
+    double phase_shift = (phaseCal_CT[lChannel] / 360.0 + ADC_Sequence[lChannel+1] * 
+                           (double)ADCDuration * cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
+    y[lChannel] = sin(phase_shift) / sin(sampleRate);        
+    x[lChannel] = cos(phase_shift) - y[lChannel] * cos(sampleRate);
 }
 
 void EmonLibCM_cycles_per_second(int _cycles_per_second)
 {
     cycles_per_second = _cycles_per_second;
     datalogPeriodInMainsCycles = datalog_period_in_seconds * cycles_per_second;  
+    int conversionLeadTime = (CONVERSION_LEAD_TIME >> (3 - ((temperatureResolution & 0x70) >> 5)));  
+        // Should give 95 - 760 ms lead time, now convert to cycles (for a.c. present) or samples (for a.c. not present).
+    temperatureConversionDelayTime = datalogPeriodInMainsCycles - (long)conversionLeadTime * cycles_per_second / 1000 - 1; 
+        // '-1' to counter the effect of integer truncation, and make sure there is some spare time
 }
 
 void EmonLibCM_min_startup_cycles(int _min_startup_cycles)
@@ -274,6 +304,13 @@ void EmonLibCM_datalog_period(float _datalog_period_in_seconds)
 {
     datalog_period_in_seconds = _datalog_period_in_seconds;
     datalogPeriodInMainsCycles = datalog_period_in_seconds * cycles_per_second;  
+    int conversionLeadTime = (CONVERSION_LEAD_TIME >> (3 - ((temperatureResolution & 0x70) >> 5)));  
+        // Should give 95 - 760 ms lead time, now convert to cycles (for a.c. present) or samples (for a.c. not present).
+    temperatureConversionDelayTime = datalogPeriodInMainsCycles - (long)conversionLeadTime * cycles_per_second / 1000 - 1; 
+        // '-1' to counter the effect of integer truncation, and make sure there is some spare time
+    temperatureConversionDelaySamples = ((unsigned long)(datalog_period_in_seconds * 1000.0) 
+        - (unsigned long)conversionLeadTime - 5) * 1000 / ADCDuration;
+        // '- 5' extra 5 ms to make sure there is some spare time
 }
 
 void EmonLibCM_setADC(int _ADCBits,  int _ADCDuration)
@@ -285,12 +322,19 @@ void EmonLibCM_setADC(int _ADCBits,  int _ADCDuration)
 void EmonLibCM_setPulseEnable(bool _enable)
 {
     PulseEnabled = _enable;
+    PulseChange = true;
 }
 
 void EmonLibCM_setPulsePin(int _pin, int _interrupt)
 {
     PulsePin = _pin;
     PulseInterrupt = _interrupt;
+}
+
+void EmonLibCM_setPulsePin(int _pin)
+{
+    PulsePin = _pin;
+    PulseInterrupt = digitalPinToInterrupt(PulsePin);
 }
 
 void EmonLibCM_setPulseMinPeriod(int _period)
@@ -343,6 +387,13 @@ long EmonLibCM_getWattHour(int channel)
 unsigned long EmonLibCM_getPulseCount(void)
 {
     return pulseCount;
+}
+
+int EmonLibCM_getLogicalChannel(byte ADC_Input)
+{
+    // Look up logical channel associated with physical pin 
+    //  N.B. Returns 255 for an unused input
+    return lChannel[ADC_Input];
 }
 
 
@@ -405,11 +456,13 @@ void EmonLibCM_Init(void)
     digitalWrite(SAMPPIN, LOW);
 #endif
 
+
     if (PulseEnabled)
     {
         pinMode(PulsePin, INPUT_PULLUP);                              // Set interrupt pulse counting pin as input
         attachInterrupt(PulseInterrupt, onPulse, RISING);             // Attach pulse counting interrupt pulse counting,  
     }
+     
 }
 
 /**************************************************************************************************
@@ -519,11 +572,25 @@ void EmonLibCM_get_readings()
         }
     }           
 
+    if (PulseChange)
+    {
+        if (PulseEnabled)
+        {
+            pinMode(PulsePin, INPUT_PULLUP);                              // Set interrupt pulse counting pin as input
+            attachInterrupt(PulseInterrupt, onPulse, RISING);             // Attach pulse counting interrupt  
+        }
+        else 
+            detachInterrupt(PulseInterrupt);                              // Detach pulse counting interrupt
+        PulseChange = false; 
+    }
+    
     if (pulses)                         // if the ISR has counted some pulses, update the total count
     {
         pulseCount += pulses;
         pulses= 0;
     }
+        
+    
     sei();
 
     // Calculate the final values, scaling for the number of samples and applying calibration coefficients.
@@ -988,6 +1055,7 @@ void EmonLibCM_setTemperatureAddresses(DeviceAddress *addressArray)
 void EmonLibCM_setTemperatureAddresses(DeviceAddress *addressArray, bool keep)
 {
     temperatureSensors = addressArray; 
+    keepAddresses = keep;
     if (!keep)
         temperatureSensors[0][0] = 0x00;        // Used by "TemperatureEnable" to trigger search for sensors
 }
@@ -1017,6 +1085,8 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         return;                                         // & quit.
     }
 
+    oneWire.begin(W1Pin);                               // In case W1Pin has changed.
+
     if (temperatureEnabled = _enable)
     {
         if (datalog_period_in_seconds < 1.0)            // Not enough time to convert between samples.
@@ -1030,9 +1100,14 @@ void EmonLibCM_TemperatureEnable(bool _enable)
            temperatures[j] = UNUSED_TEMPERATURE;        // write 'Sensor never seen' marker to temperatures array
 
         sensors.begin();
-        numSensors=(sensors.getDeviceCount()); 
-        if (numSensors > temperatureMaxCount)
+        if (keepAddresses)
             numSensors = temperatureMaxCount;
+        else
+        {
+            numSensors = (sensors.getDeviceCount()); 
+            if (numSensors > temperatureMaxCount)
+                numSensors = temperatureMaxCount;
+        }
         byte j=0;                                       // search for one wire devices and copy to device address array.
        
         if (temperatureSensors[0][0] != 0x28)           // 0x28 = signature of a DS18B20, so a pre-existing array - do not search for sensors
@@ -1065,14 +1140,14 @@ void EmonLibCM_TemperatureEnable(bool _enable)
 
 void printTemperatureSensorAddresses(void)
 {
-    Serial.print("Temperature Sensors found = ");
+    Serial.print(F("Temperature Sensors found = "));
     Serial.print(numSensors);
     Serial.print(" of ");
     Serial.print(temperatureMaxCount);
     
     if (numSensors)
     {
-        Serial.println(", with addresses...");
+        Serial.println(F(", with addresses..."));
             for (int j=0; j< numSensors; j++)
             {
                 for (int i=0; i<8; i++)
@@ -1085,9 +1160,9 @@ void printTemperatureSensorAddresses(void)
             }
     }
     Serial.println();
-    Serial.print("Temperature measurement is");
+    Serial.print(F("Temperature measurement is"));
     Serial.print(temperatureEnabled?"":" NOT");
-    Serial.println(" enabled.");
+    Serial.println(F(" enabled."));
     Serial.println();
     delay(5);
         
@@ -1117,11 +1192,16 @@ void retrieveTemperatures(void)
         {
             byte buf[9];
             int result;
+            if (datalog_period_in_seconds < 0.2)
+            {
+                temperatures[j] = BAD_TEMPERATURE;   // not enough time to get a reading
+                continue;
+            }
 
             if (!oneWire.reset())
             {
-                result=BAD_TEMPERATURE;
-                break;
+                temperatures[j] = BAD_TEMPERATURE;
+                continue;
             }
             else
             {

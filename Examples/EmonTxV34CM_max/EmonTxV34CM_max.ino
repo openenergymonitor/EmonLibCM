@@ -23,7 +23,7 @@ const int nodeID = 10;                                     //  node ID for this 
 
 const int networkGroup = 210;                              //  wireless network group
                                                            //  - needs to be same as emonBase / emonPi and emonGLCD. OEM default is 210
-
+bool recalibrate = false;                                  //  Do not demonstrate the recalibration functions
 /*
 
 emonhub.conf nodeid is 10 - switch is ignored)
@@ -80,7 +80,7 @@ void setup()
   
   EmonLibCM_min_startup_cycles(10);                        // number of cycles to let ADC run before starting first actual measurement
 
-  EmonLibCM_setPulseEnable(true);                          // Enable pulse counting
+  EmonLibCM_setPulseEnable(false);                          // Enable pulse counting
   EmonLibCM_setPulsePin(3, 1);
   EmonLibCM_setPulseMinPeriod(0);
 
@@ -105,6 +105,17 @@ void setup()
 void loop()             
 {
 
+  if (recalibrate)                                         // recalibrate should be set when new calibration values become available
+  {
+      
+    EmonLibCM_ReCalibrate_VChannel(268.97);                // ADC Input channel, voltage calibration new value 
+    EmonLibCM_ReCalibrate_IChannel(1, 90.91, 4.2);         // ADC Input channel, current calibration, phase calibration new values
+    EmonLibCM_ReCalibrate_IChannel(2, 90.91, 4.2);         //  It is only necessary to use one of these functions if that calibration 
+    EmonLibCM_ReCalibrate_IChannel(3, 90.91, 4.2);         //  value needs to be changed.
+    EmonLibCM_ReCalibrate_IChannel(4, 16.67, 1.0);         //  
+    recalibrate = false;                                   // Do it once only.
+  }
+  
   if (EmonLibCM_Ready())   
   {
 
