@@ -1,0 +1,17 @@
+{
+  "name": "EmonLib",
+  "keywords": "electricity, energy, monitoring",
+  "description": "Energy Monitoring Continuous Sampling Library",
+  "version": "2.02.0",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/openenergymonitor/EmonLibCM.git"
+  },
+  "frameworks": "arduino",
+  "platforms":
+  [
+    "atmelavr",
+    "atmelsam"
+  ]
+}
