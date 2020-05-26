@@ -22,7 +22,7 @@ The library is distributed by @Robert.Wall as a compressed Zip file in the forum
 
 ---
 
-## Installing The Library 
+## Installing The Library
 
 ### Arduino IDE
 
@@ -79,4 +79,3 @@ The example sketches are intended only as a demonstration of the library. They d
 </table>
 
 Please see [EmonLibCM - Version 2 (Support)](https://community.openenergymonitor.org/t/emonlibcm-version-2-support/9242/) to comment or request support.
-
