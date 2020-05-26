@@ -73,9 +73,9 @@ The example sketches are intended only as a demonstration of the library. They d
 
 <table>
 <th>MD5 Hashes:</th><th>&nbsp;</th>
-<tr><td>EmonLibCM.cpp</td><td>9dd796794a90eab858a8dea60fdc2389</td></tr>
-<tr><td>EmonLibCM.h</td><td> db208228f62bc5f804569e70efbcee63</td></tr>
-<tr><td>emonLibCM User Doc.pdf</td><td>b7ed8b6f7004d0c9de38089c20695026</td></tr>
+<tr><td>EmonLibCM.zip</td><td>52fce884f3b76cca5531095563475992</td></tr>
+<tr><td>EmonLibCM.cpp</td><td> 51a8a40532e209b02c4861ce7dca5614</td></tr>
+<tr><td>emonLibCM.h</td><td>9004e6fec7efc390babd9f5c2be7b9ab</td></tr>
 </table>
 
 Please see [EmonLibCM - Version 2 (Support)](https://community.openenergymonitor.org/t/emonlibcm-version-2-support/9242/) to comment or request support.
