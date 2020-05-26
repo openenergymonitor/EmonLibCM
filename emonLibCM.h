@@ -19,6 +19,8 @@
 // Version 2.0  21/11/2018
 // Version 2.01  3/12/2018  No change.
 // Version 2.02 13/07/2019  getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
+// Version 2.03 25/10/2019  getLineFrequency( ), setADC_VRef( ) added.
+
                               
 
 
@@ -57,6 +59,11 @@
 #define TEMPRES_12 0x7F
 #define CONVERSION_LEAD_TIME 752     // this is the conversion time of the DS18B20 in ms at 12-bits (rounded up to multiple of 8).
 
+#define VREF_EXTERNAL 0              // ADC Reference is Externally supplied voltage
+#define VREF_NORMAL 1                // ADC Reference is Processor Supply (AVcc)
+#define VREF_INTERNAL 3              // ADC Reference is Internal 1.1V reference
+
+
 typedef uint8_t DeviceAddress[8];
 
 void EmonLibCM_cycles_per_second(int _cycles_per_second);
@@ -66,6 +73,7 @@ void EmonLibCM_setADC(int _ADCBits,  int ADCDuration);
 void EmonLibCM_ADCCal(double _RefVoltage);
 void EmonLibCM_SetADC_VChannel(byte ADC_Input, double _amplitudeCal);
 void EmonLibCM_SetADC_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal);
+void EmonLibCM_setADC_VRef(byte _ADCRef);
 void EmonLibCM_ReCalibrate_VChannel(double _amplitudeCal);
 void EmonLibCM_ReCalibrate_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal);
 
@@ -82,6 +90,7 @@ int EmonLibCM_getApparentPower(int channel);
 double EmonLibCM_getPF(int channel);
 double EmonLibCM_getIrms(int channel);
 double EmonLibCM_getVrms(void);
+double EmonLibCM_getLineFrequency(void);
 long EmonLibCM_getWattHour(int channel);
 unsigned long EmonLibCM_getPulseCount(void);
 
