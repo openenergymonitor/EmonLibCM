@@ -38,7 +38,7 @@ See: https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
 
 */       
 
-typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6; unsigned long pulseCount; } PayloadTX;        // neat way of packaging data for RF comms
+typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6; unsigned long pulseCount; } PayloadTX;        // package the data for RF comms
 
 PayloadTX emontx;                                          // create an instance
 
@@ -69,10 +69,10 @@ void loop()
     delay(5);
 
     emontx.power1 = EmonLibCM_getRealPower(0);             // Copy the desired variables ready for transmission
-	emontx.power2 = EmonLibCM_getRealPower(1);
-	emontx.power3 = EmonLibCM_getRealPower(2);
-	emontx.power4 = EmonLibCM_getRealPower(3);
-	emontx.Vrms   = EmonLibCM_getVrms() * 100;
+    emontx.power2 = EmonLibCM_getRealPower(1);
+    emontx.power3 = EmonLibCM_getRealPower(2);
+    emontx.power4 = EmonLibCM_getRealPower(3);
+    emontx.Vrms   = EmonLibCM_getVrms() * 100;
     
     rf12_sendNow(0, &emontx, sizeof emontx);               //send data
 
@@ -80,8 +80,8 @@ void loop()
  
     Serial.print(" V=");Serial.println(EmonLibCM_getVrms());
 
-	for (byte ch=0; ch<4; ch++)
-	{
+    for (byte ch=0; ch<4; ch++)
+    {
         Serial.print("Ch ");Serial.print(ch+1);
         Serial.print(" I=");Serial.print(EmonLibCM_getIrms(ch),3);
         Serial.print(" W=");Serial.print(EmonLibCM_getRealPower(ch));

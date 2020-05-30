@@ -39,7 +39,7 @@ See: https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
 
 */       
 
-typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3; } PayloadTX;        // neat way of packaging data for RF comms
+typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6; } PayloadTX;        // package the data for RF comms
 
 PayloadTX emontx;                                          // create an instance
 
@@ -80,7 +80,7 @@ void setup()
   
   EmonLibCM_min_startup_cycles(10);                        // number of cycles to let ADC run before starting first actual measurement
 
-  EmonLibCM_setPulseEnable(false);                          // Enable pulse counting
+  EmonLibCM_setPulseEnable(true);                          // Enable pulse counting
   EmonLibCM_setPulsePin(3, 1);
   EmonLibCM_setPulseMinPeriod(0);
 
@@ -122,30 +122,34 @@ void loop()
     Serial.println(EmonLibCM_acPresent()?"AC present ":"AC missing ");
     delay(5);
 
-    emontx.power1 = EmonLibCM_getRealPower(0);   // Copy the desired variables ready for transmission
-	emontx.power2 = EmonLibCM_getRealPower(1);
-	emontx.power3 = EmonLibCM_getRealPower(2);
-	emontx.power4 = EmonLibCM_getRealPower(3);
-	emontx.Vrms   = EmonLibCM_getVrms() * 100;
+    emontx.power1 = EmonLibCM_getRealPower(0);   // Copy the desired variables ready for transmission 
+    emontx.power2 = EmonLibCM_getRealPower(1); 
+    emontx.power3 = EmonLibCM_getRealPower(2);
+    emontx.power4 = EmonLibCM_getRealPower(3);
+    emontx.Vrms   = EmonLibCM_getVrms() * 100;
 
     emontx.T1 = allTemps[0];
     emontx.T2 = allTemps[1];
     emontx.T3 = allTemps[2];
+    emontx.T4 = allTemps[3];
+    emontx.T5 = allTemps[4];
+    emontx.T6 = allTemps[5];
    
     rf12_sendNow(0, &emontx, sizeof emontx);     //send data
 
     delay(50);
 
-    Serial.print(" V=");Serial.println(EmonLibCM_getVrms());
+    Serial.print(" V=");Serial.print(EmonLibCM_getVrms());
+    Serial.print(" f=");Serial.println(EmonLibCM_getLineFrequency(),2);           
 
-	for (byte ch=0; ch<4; ch++)
-	{
+    for (byte ch=0; ch<4; ch++)
+    {
         Serial.print("Ch ");Serial.print(ch+1);
         Serial.print(" I=");Serial.print(EmonLibCM_getIrms(ch),3);
         Serial.print(" W=");Serial.print(EmonLibCM_getRealPower(ch));
         Serial.print(" VA=");Serial.print(EmonLibCM_getApparentPower(ch));
         Serial.print(" Wh=");Serial.print(EmonLibCM_getWattHour(ch));
-        Serial.print(" pf=");Serial.print(EmonLibCM_getPF(ch),4);      
+        Serial.print(" pf=");Serial.print(EmonLibCM_getPF(ch),4);   
         Serial.println();
         delay(10);
     } 

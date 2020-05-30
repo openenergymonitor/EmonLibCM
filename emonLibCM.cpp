@@ -22,7 +22,10 @@
 //                            getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
 //                            pulse & temperatures were set/enabled only at startup, setTemperatureDataPin was ineffective, preloaded sensor addresses
 //                            not handled properly.
-//
+// Version 2.03 25/10/2019  Mains Frequency reporting [getLineFrequency( )]added, 
+//                            ADC reference source was AVcc and not selectable - ability to select [setADC_VRef( )] added, 
+//                            sampleSetsDuringThisDatalogPeriod (and derivatives) was samplesDuringThisDatalogPeriod etc,
+//                            Energy calculation changed to use internal clock rather than mains time by addition of "frequencyDeviation".
 
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
@@ -69,6 +72,9 @@ byte no_of_Iinputs = 0;
 volatile boolean datalogEventPending;
 unsigned long missing_Voltage = 0;                                     // provides a timebase mechanism for current-only use
                                                                        //  - uses the ADC free-running rate as a clock.
+double line_frequency;                                                 // Timed from sample rate & cycle count
+
+                                                                       
 // Arrays for current channels (zero-based)                                                                       
 int realPower_CT[max_no_of_channels];
 int apparentPower_CT[max_no_of_channels];
@@ -85,6 +91,7 @@ static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5};        // <-- Se
 int ADCBits = 10;                                                      // 10 for the emonTx and most of the Arduino range, 12 for the Arduino Due.
 double Vref = 3.3;                                                     // ADC Reference Voltage = 3.3 for emonTX, 5.0 for most of the Arduino range.
 int ADCDuration = 104;                                                 // Time in microseconds for one ADC conversion = 104 for 16 MHz clock 
+byte ADCRef = VREF_NORMAL  << 6;                                       // ADC Reference: VREF_EXTERNAL, VREF_NORMAL = AVcc, VREF_INTERNAL = Internal 1.1 V
 
 // Pulse Counting;
 bool PulseEnabled = false;
@@ -192,7 +199,7 @@ int64_t  sumPB_CT[max_no_of_channels];              // 'partial' power for real 
 uint64_t sumIsquared_CT[max_no_of_channels];
 long     cumI_deltas_CT[max_no_of_channels];        // <--- for offset removal (I)
 uint64_t sum_Vsquared;                              // for Vrms datalogging   
-long     samplesDuringThisDatalogPeriod;   
+long     sampleSetsDuringThisDatalogPeriod;   
 
 // Copies of ISR data for use by the main code
 // These are filled by the ADC helper routine at the end of the datalogging period
@@ -201,7 +208,7 @@ volatile int64_t  copyOf_sumPA_CT[max_no_of_channels];
 volatile int64_t  copyOf_sumPB_CT[max_no_of_channels]; 
 volatile uint64_t copyOf_sumIsquared_CT[max_no_of_channels]; 
 volatile uint64_t copyOf_sum_Vsquared;
-volatile long     copyOf_samplesDuringThisDatalogPeriod;
+volatile long     copyOf_sampleSetsDuringThisDatalogPeriod;
 volatile int64_t  copyOf_cumI_deltas[max_no_of_channels];
 volatile int64_t  copyOf_cumV_deltas;
 
@@ -319,6 +326,11 @@ void EmonLibCM_setADC(int _ADCBits,  int _ADCDuration)
     ADCDuration = _ADCDuration;
 }
 
+void EmonLibCM_setADC_VRef(byte _ADCRef)
+{
+    ADCRef = _ADCRef << 6;
+}
+
 void EmonLibCM_setPulseEnable(bool _enable)
 {
     PulseEnabled = _enable;
@@ -377,6 +389,14 @@ double EmonLibCM_getIrms(int channel)
 double EmonLibCM_getVrms(void)
 {
     return Vrms;
+}
+
+double EmonLibCM_getLineFrequency(void)
+{
+    if (acPresent)
+      return line_frequency;
+    else
+      return 0;
 }
 
 long EmonLibCM_getWattHour(int channel)
@@ -544,13 +564,14 @@ void EmonLibCM_get_readings()
     // It is theoretically possible for the values being copied from to be rewritten
     // by the ISR whilst this function is calculating the final values. This second
     // layer of buffering removes that possibility.
+    double frequencyDeviation;
     volatile int64_t  protected_sumPA[max_no_of_channels];
     volatile int64_t  protected_sumPB[max_no_of_channels];
     volatile uint64_t protected_sumIsquared[max_no_of_channels];
     volatile int64_t  protected_cumI_deltas[max_no_of_channels];
     cli();
  
-    volatile long protected_samplesDuringThisDatalogPeriod = copyOf_samplesDuringThisDatalogPeriod;
+    volatile long protected_sampleSetsDuringThisDatalogPeriod = copyOf_sampleSetsDuringThisDatalogPeriod;
     volatile uint64_t protected_sum_Vsquared = copyOf_sum_Vsquared;
     volatile int64_t  protected_cumV_deltas = copyOf_cumV_deltas;  
 
@@ -600,9 +621,12 @@ void EmonLibCM_get_readings()
     // Vrms still contains the fine voltage offset. Correct this by subtracting the "Offset V^2" before the sq. root.
     // Real Power is calculated by interpolating between the 'partial power' values, applying "trigonometric" coefficients to
     //  preserve the amplitude of the interpolated value.
-    Vrms = sqrt(((double)protected_sum_Vsquared / protected_samplesDuringThisDatalogPeriod)
-                - ((double)protected_cumV_deltas * protected_cumV_deltas / protected_samplesDuringThisDatalogPeriod / protected_samplesDuringThisDatalogPeriod)); 
-    Vrms *= voltageCal;      
+    Vrms = sqrt(((double)protected_sum_Vsquared / protected_sampleSetsDuringThisDatalogPeriod)
+                - ((double)protected_cumV_deltas * protected_cumV_deltas / protected_sampleSetsDuringThisDatalogPeriod / protected_sampleSetsDuringThisDatalogPeriod)); 
+    Vrms *= voltageCal; 
+    
+    frequencyDeviation = (double)ADCsamples_per_datalog_period / (protected_sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
+    line_frequency = cycles_per_second * frequencyDeviation;
 
     for (int i=0; i<no_of_channels; i++)    // Current channels
     {
@@ -617,14 +641,14 @@ void EmonLibCM_get_readings()
         sumRealPower = (protected_sumPA[i] * x[i] + protected_sumPB[i] * y[i]); 
                 
         // sumRealPower still contains the fine offsets of both V & I. Correct this by subtracting the "Offset Power": cumV_deltas * cumI_deltas
-        powerNow = (sumRealPower / protected_samplesDuringThisDatalogPeriod - (double)protected_cumV_deltas * protected_cumI_deltas[i] 
-                   / protected_samplesDuringThisDatalogPeriod / protected_samplesDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
+        powerNow = (sumRealPower / protected_sampleSetsDuringThisDatalogPeriod - (double)protected_cumV_deltas * protected_cumI_deltas[i] 
+                   / protected_sampleSetsDuringThisDatalogPeriod / protected_sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
       
         //  root of mean squares, removing fine offset
         //  The rms of a signal plus an offset is  sqrt( signal^2 + offset^2). 
         //  Here (signal+offset)^2 = protected_sumIsquared / no of samples
         //       offset = cumI_deltas / no of samples
-        Irms_CT[i] = sqrt(((double)protected_sumIsquared[i] / protected_samplesDuringThisDatalogPeriod) - ((double)protected_cumI_deltas[i] * protected_cumI_deltas[i] / protected_samplesDuringThisDatalogPeriod / protected_samplesDuringThisDatalogPeriod)); 
+        Irms_CT[i] = sqrt(((double)protected_sumIsquared[i] / protected_sampleSetsDuringThisDatalogPeriod) - ((double)protected_cumI_deltas[i] * protected_cumI_deltas[i] / protected_sampleSetsDuringThisDatalogPeriod / protected_sampleSetsDuringThisDatalogPeriod)); 
  
         Irms_CT[i] *= currentCal[i];    
     
@@ -635,7 +659,8 @@ void EmonLibCM_get_readings()
           pf[i] = 0.0;
         realPower_CT[i] = powerNow + 0.5;                                                       // rounded to nearest Watt
         apparentPower_CT[i]   = VA + 0.5;                                                       // rounded to nearest VA
-        energyNow = (powerNow * datalog_period_in_seconds) + residualEnergy_CT[i];              // fp for accuracy
+        energyNow = (powerNow * datalog_period_in_seconds / frequencyDeviation)                 // correct for mains time != clock time
+          + residualEnergy_CT[i];                                                               // fp for accuracy
         wattHoursRecent = energyNow / 3600;                                                     // integer assignment to extract whole Wh
         wh_CT[i]+= wattHoursRecent;                                                             // accumulated WattHours since start-up
         residualEnergy_CT[i] = energyNow - (wattHoursRecent * 3600.0);                          // fp for accuracy
@@ -747,7 +772,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
     #ifdef INTEGRITY
                 lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif          
-                samplesDuringThisDatalogPeriod = 0;
+                sampleSetsDuringThisDatalogPeriod = 0;
             }
           
           // Start temperature conversion
@@ -775,8 +800,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
               copyOf_sum_Vsquared = sum_Vsquared;
               sum_Vsquared = 0;
               cumV_deltas = 0;
-              copyOf_samplesDuringThisDatalogPeriod = samplesDuringThisDatalogPeriod;
-              samplesDuringThisDatalogPeriod = 0;
+              copyOf_sampleSetsDuringThisDatalogPeriod = sampleSetsDuringThisDatalogPeriod;
+              sampleSetsDuringThisDatalogPeriod = 0;
     #ifdef INTEGRITY
               copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
               lowestNoOfSampleSetsPerMainsCycle = 999;
@@ -842,8 +867,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
         sum_Vsquared = 0;
         copyOf_cumV_deltas = cumV_deltas;
         cumV_deltas = 0;
-        copyOf_samplesDuringThisDatalogPeriod = samplesDuringThisDatalogPeriod;
-        samplesDuringThisDatalogPeriod = 0;
+        copyOf_sampleSetsDuringThisDatalogPeriod = sampleSetsDuringThisDatalogPeriod;
+        sampleSetsDuringThisDatalogPeriod = 0;
 #ifdef INTEGRITY
         copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
         // lowestNoOfSampleSetsPerMainsCycle = 999;
@@ -892,7 +917,7 @@ void EmonLibCM_interrupt()
   if (next>no_of_channels)                 // no_of_channels = count of Current channels in use. Voltage channel (0) is always read, so total is no_of_channels + 1
       next -= no_of_channels+1;
   
-  ADMUX = 0x40 + ADC_Sequence[next];       // set up the next-but-one conversion
+  ADMUX = ADCRef + ADC_Sequence[next];     // set up the next-but-one conversion
 #ifdef SAMPPIN
     digitalWrite(SAMPPIN,LOW);
 #endif
@@ -940,7 +965,7 @@ void EmonLibCM_interrupt()
 #ifdef INTEGRITY
       sampleSetsDuringThisMainsCycle++; 
 #endif
-      samplesDuringThisDatalogPeriod++;      
+      sampleSetsDuringThisDatalogPeriod++;      
       samplesDuringThisCycle++;
       //
       // for the Vrms calculation 
