@@ -1,6 +1,8 @@
 /*
 
-"Minimal" sketch to demonstrate emonLibCM
+"Minimal" sketch to demonstrate emonLibCM - not using JeeLib
+
+ONLY the Hope RFM69CW radio is suitable for use with this sketch.
 
 This sketch assumes that the default values for the emonTx V3.4 are 
 applicable, that no input calibration is required, mains frequency 
@@ -11,17 +13,23 @@ and temperature monitoring are not required, and that 4 'standard'
 */
 #include <Arduino.h>
 #include "emonLibCM.h"
+#include <SPI.h>
+#include <util/crc16.h>
 
-#define RF69_COMPAT 1                                      //  Set to 1 if using RFM69CW, or 0 if using RFM12B
-#include <JeeLib.h>                                        //  https://github.com/jcw/jeelib - Tested with JeeLib 10 April 2017
+
 // ISR(WDT_vect) { Sleepy::watchdogEvent(); } 
 
-#define RF_freq RF12_433MHZ                                //  Frequency of radio module can be RF12_433MHZ, RF12_868MHZ or RF12_915MHZ. 
-                                                           //  - You must use the one matching the module you have.
+
+enum rfband {RF12_433MHZ = 1, RF12_868MHZ, RF12_915MHZ};   // frequency bands.
+void rfm_init(byte RF_freq = RF12_433MHZ);
+bool rfm_send(const byte *data, const byte size, const byte group, const byte node, const byte rf_power = 0x99, const int threshold = -97, const byte timeout = 15);
+
+#define RFMSELPIN 10                                       //  RFM pins
+#define RFMIRQPIN 2                                        //  RFM pins
+                                                           
 const int nodeID = 10;                                     //  node ID for this emonTx. This sketch does NOT interrogate the DIP switch.
 
-const int networkGroup = 210;                              //  wireless network group
-                                                           //  - needs to be same as emonBase / emonPi and emonGLCD. OEM default is 210
+const int networkGroup = 210;                              //  wireless network group - OEM standard is 210
 
 /*
 
@@ -38,9 +46,7 @@ See: https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
 
 */       
 
-typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6; unsigned long pulseCount; } PayloadTX;        // package the data for RF comms
-
-PayloadTX emontx;                                          // create an instance
+struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6; unsigned long pulseCount; } emontx;        // package the data for RF comms
 
  
 void setup() 
@@ -51,9 +57,9 @@ void setup()
   Serial.end();
   Serial.begin(115200);
   
-  Serial.println("\nEmonTx v3.4 EmonLibCM Continuous Monitoring Minimal Demo"); 
+  Serial.println("\nEmonTx v3.4 EmonLibCM Continuous Monitoring Minimal Demo - not using JeeLib"); 
 
-  rf12_initialize(nodeID, RF_freq, networkGroup);          // initialize radio module
+  rfm_init();                                              // initialize radio module - Default = 433 MHz. You must use the frequency matching the module you have.
 
   EmonLibCM_Init();                                        // Start continuous monitoring.
 
@@ -74,8 +80,7 @@ void loop()
     emontx.power4 = EmonLibCM_getRealPower(3);
     emontx.Vrms   = EmonLibCM_getVrms() * 100;
     
-    rf12_sendNow(0, &emontx, sizeof emontx);               //send data
-
+    rfm_send((byte *)&emontx, sizeof(emontx), networkGroup, nodeID); //send data: Defaults: power = 0x99, threshold = -97 dB, timeout = 15 ms
     delay(50);
  
     Serial.print(" V=");Serial.println(EmonLibCM_getVrms());
@@ -91,11 +96,5 @@ void loop()
         Serial.println();
         delay(10);
     } 
-
-    delay(10);
-        
   }
-  else
-    rf12_recvDone();
-  
 }

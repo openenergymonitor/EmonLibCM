@@ -22,16 +22,28 @@
 //                            getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
 //                            pulse & temperatures were set/enabled only at startup, setTemperatureDataPin was ineffective, preloaded sensor addresses
 //                            not handled properly.
+//              18/10/2019  Sketch using this became the default in emonTx V3.4
 // Version 2.03 25/10/2019  Mains Frequency reporting [getLineFrequency( )]added, 
 //                            ADC reference source was AVcc and not selectable - ability to select [setADC_VRef( )] added, 
 //                            sampleSetsDuringThisDatalogPeriod (and derivatives) was samplesDuringThisDatalogPeriod etc,
 //                            Energy calculation changed to use internal clock rather than mains time by addition of "frequencyDeviation".
+// Version 2.04 1/8/2020     In examples, 'else' added to "if (EmonLibCM_Ready())" to keep JeeLib alive. Example for RFM69CW only ('Classic' format) and 
+//                           not using JeeLib added.
+//                           getDatalog_period( ) added. Temperature array is now ignored if first device is not a DS18B20. 'BAD_TEMPERATURE' now returned if
+//                           sensor address is made invalid during operation. Array above is sensor count is filled with UNUSED_TEMPERATURE. Superfluous 'if' 
+//                           removed at end of retrieveTemperatures() - power pin is now set low regardless. 'else' added to 'if' in
+//                           (if (temperatureEnabled = _enable)) in TemperatureEnable( ) to ensure power is off if not required, delay after retrieving 
+//                           a temperature was 5 ms. 
+//                           unsigned long missing_VoltageSamples (was "missing_Voltage"), bool firstcycle were not volatile, unnecessary copies of 
+//                           'protected' variables removed, datalog period was set only at startup & minimum limit added. cycleCountForDatalogging, 
+//                           min_startup_cycles were signed. 
+//                           (Plus some cosmetic changes)
 
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
 
-// #define SAMPPIN 5           // Preferred pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
-// #define SAMPPIN 19          // Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
+// #define SAMPPIN 5           // EmonTx: Preferred pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
+// #define SAMPPIN 19          // EmonTx: Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 
 #include "emonLibCM.h"
 
@@ -46,19 +58,11 @@
 #endif
 
 
-// Dallas DS18B20 commands
-
-#include <Wire.h>
-#include <SPI.h>
-#include <util/crc16.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>                                         //http://download.milesburton.com/Arduino/MaximTemperature/DallasTemperature_LATEST.zip
 
 
-
-int cycles_per_second = 50;                                            // mains frequency in Hz (i.e. 50 or 60)
+unsigned int cycles_per_second = 50;                                   // mains frequency in Hz (i.e. 50 or 60)
 float datalog_period_in_seconds = 10.0;
-int min_startup_cycles = 10;
+unsigned int min_startup_cycles = 10;
 
 // Maximum number of Current (I) channels used to create arrays
 static const int max_no_of_channels = 5;
@@ -70,7 +74,7 @@ byte no_of_Iinputs = 0;
 
 // for general interaction between the main code and the ISR
 volatile boolean datalogEventPending;
-unsigned long missing_Voltage = 0;                                     // provides a timebase mechanism for current-only use
+volatile unsigned long missing_VoltageSamples = 0;                            // provides a timebase mechanism for current-only use
                                                                        //  - uses the ADC free-running rate as a clock.
 double line_frequency;                                                 // Timed from sample rate & cycle count
 
@@ -143,14 +147,14 @@ void onPulse();                                                        // pulse 
 
 // The combined step down is therefore 20.69 x 13 = 268.97 which is the 
 // theoretical calibration constant. The actual constant for a given
-//   unit and ac adapter is likely to be different by a few percent.
-//   Other adapters are different may be more different.
+// unit and ac adapter is likely to be different by a few percent.
+// Other adapters may be different by more.
 
 // Current calibration constant. This is the mains current that would give 1 V
 // at the ADC input:
-// Current calibration constant channels 1 - 3 = 2000 / 22 Ohms burden resistor = 90.9
-// (The CT sensor is 100 A : 50 mA, therefore a ratio of 2000:1)
-//  for channel 4 is 2000 / 120R burden resistor = 16.67
+// Current calibration constant channels 1 - 3 = 100 A / 50 mA / 22 Ohms burden resistor = 90.9
+// (The default CT sensor is 100 A : 50 mA)
+//  for channel 4 is 100 A / 50 mA  / 120R burden resistor = 16.67
 //  The actual constant for a given unit and CT is likely to be different by a few percent.
 
 // phaseCal is used to alter the phase of the voltage waveform relative to the
@@ -183,13 +187,13 @@ double voltageCal = 268.97;
 unsigned int ADC_Counts = 1 << ADCBits;
 
 bool stop = false;
-bool firstcycle = true;
+volatile bool firstcycle = true;
     
 unsigned int samplesDuringThisCycle;
 bool acPresent = false;                             // TRUE when ac voltage input is detected.
 unsigned int acDetectedThreshold = ADC_Counts >> 5; // ac voltage detection threshold, ~10% of nominal voltage (given large amount of ripple)
 
-int datalogPeriodInMainsCycles;
+unsigned int datalogPeriodInMainsCycles;
 unsigned long ADCsamples_per_datalog_period;
 
 // accumulators & counters for use by the ISR
@@ -222,9 +226,9 @@ volatile int copyOf_lowestNoOfSampleSetsPerMainsCycle;
 enum polarities {NEGATIVE, POSITIVE};
 // For an enhanced polarity detection mechanism, which includes a persistence check
 #define POLARITY_CHECK_MAXCOUNT 3 // 1
-enum polarities polarityUnconfirmed;   
-enum polarities polarityConfirmed;                  // for improved zero-crossing detection
-enum polarities polarityConfirmedOfLastSampleV;     // for zero-crossing detection
+polarities polarityUnconfirmed;   
+polarities polarityConfirmed;                       // for improved zero-crossing detection
+polarities polarityConfirmedOfLastSampleV;          // for zero-crossing detection
 
 float residualEnergy_CT[max_no_of_channels];
 double x[max_no_of_channels], y[max_no_of_channels]; // coefficients for real power interpolation
@@ -249,8 +253,8 @@ int *temperatures = NULL;
 unsigned int temperatureConversionDelayTime; 
 unsigned long temperatureConversionDelaySamples;
 
-bool startConvertTemperatures = false;
-bool convertingTemperaturesNoAC = false;            // Only used when not using mains for timing.
+volatile bool startConvertTemperatures = false;
+volatile bool convertingTemperaturesNoAC = false;            // Only used when not using mains for timing.
 
 /**************************************************************************************************
 *
@@ -281,43 +285,35 @@ void EmonLibCM_ReCalibrate_VChannel(double _amplitudeCal)
 
 void EmonLibCM_ReCalibrate_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal)
 {
-    const double two_pi = 6.2831853;
-    double sampleRate = ADCDuration * (no_of_channels + 1) * two_pi * cycles_per_second / MICROSPERSEC; // in radians
     byte lChannel = EmonLibCM_getLogicalChannel(ADC_Input);
     currentCal[lChannel] = _amplitudeCal * Vref / ADC_Counts;  
     phaseCal_CT[lChannel] = _phaseCal;
-    double phase_shift = (phaseCal_CT[lChannel] / 360.0 + ADC_Sequence[lChannel+1] * 
-                           (double)ADCDuration * cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
-    y[lChannel] = sin(phase_shift) / sin(sampleRate);        
-    x[lChannel] = cos(phase_shift) - y[lChannel] * cos(sampleRate);
+    calcPhaseShift(lChannel);
 }
 
-void EmonLibCM_cycles_per_second(int _cycles_per_second)
+void EmonLibCM_cycles_per_second(unsigned int _cycles_per_second)
 {
     cycles_per_second = _cycles_per_second;
     datalogPeriodInMainsCycles = datalog_period_in_seconds * cycles_per_second;  
-    int conversionLeadTime = (CONVERSION_LEAD_TIME >> (3 - ((temperatureResolution & 0x70) >> 5)));  
-        // Should give 95 - 760 ms lead time, now convert to cycles (for a.c. present) or samples (for a.c. not present).
-    temperatureConversionDelayTime = datalogPeriodInMainsCycles - (long)conversionLeadTime * cycles_per_second / 1000 - 1; 
-        // '-1' to counter the effect of integer truncation, and make sure there is some spare time
+    calcTemperatureLead();
+    for (byte i = 0; i<no_of_channels; i++)
+        calcPhaseShift(i);
 }
 
-void EmonLibCM_min_startup_cycles(int _min_startup_cycles)
+void EmonLibCM_min_startup_cycles(unsigned int _min_startup_cycles)
 {
     min_startup_cycles = _min_startup_cycles;
 }
 
 void EmonLibCM_datalog_period(float _datalog_period_in_seconds)
 {
+    if (datalog_period_in_seconds < 0.1)
+        datalog_period_in_seconds = 0.1;
     datalog_period_in_seconds = _datalog_period_in_seconds;
     datalogPeriodInMainsCycles = datalog_period_in_seconds * cycles_per_second;  
-    int conversionLeadTime = (CONVERSION_LEAD_TIME >> (3 - ((temperatureResolution & 0x70) >> 5)));  
-        // Should give 95 - 760 ms lead time, now convert to cycles (for a.c. present) or samples (for a.c. not present).
-    temperatureConversionDelayTime = datalogPeriodInMainsCycles - (long)conversionLeadTime * cycles_per_second / 1000 - 1; 
-        // '-1' to counter the effect of integer truncation, and make sure there is some spare time
-    temperatureConversionDelaySamples = ((unsigned long)(datalog_period_in_seconds * 1000.0) 
-        - (unsigned long)conversionLeadTime - 5) * 1000 / ADCDuration;
-        // '- 5' extra 5 ms to make sure there is some spare time
+    ADCsamples_per_datalog_period = datalog_period_in_seconds * MICROSPERSEC / ADCDuration;    
+    // Set lead time to start temperature conversion
+    calcTemperatureLead();
 }
 
 void EmonLibCM_setADC(int _ADCBits,  int _ADCDuration)
@@ -391,12 +387,17 @@ double EmonLibCM_getVrms(void)
     return Vrms;
 }
 
+double EmonLibCM_getDatalog_period(void)
+{
+    return datalog_period_in_seconds;
+}
+
 double EmonLibCM_getLineFrequency(void)
 {
     if (acPresent)
-      return line_frequency;
+        return line_frequency;
     else
-      return 0;
+        return 0;
 }
 
 long EmonLibCM_getWattHour(int channel)
@@ -439,9 +440,6 @@ void EmonLibCM_Init(void)
             ChannelInUse[i] = false;
     }
  
-    const double two_pi = 6.2831853;
-    double sampleRate = ADCDuration * (no_of_channels + 1) * two_pi * cycles_per_second / MICROSPERSEC; // in radians
-
     // Set up voltage calibration to take account of ADC width etc
     voltageCal = voltageCal * Vref / ADC_Counts;
     
@@ -449,18 +447,7 @@ void EmonLibCM_Init(void)
     for (int i=0; i<no_of_channels; i++)
     {
         currentCal[i] = currentCal[i] * Vref / ADC_Counts;  
- 
-        // phaseCal value supplied is the difference between VT lead and CT lead in degrees
-        //  Add the delay due to the time taken by the ADC to convert one sample (ADCDuration),
-        //  knowing the position of the current sample with respect to 
-        //  the voltage, then convert to radians.
-        // x & y are the constants used in the power interpolation. (Sanity check: x + y ≈ 1)
-        
-        double phase_shift = (phaseCal_CT[i] / 360.0 + ADC_Sequence[i+1] * 
-                               (double)ADCDuration * cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
-        y[i] = sin(phase_shift) / sin(sampleRate);        
-        x[i] = cos(phase_shift) - y[i] * cos(sampleRate);
-    
+        calcPhaseShift(i);
         residualEnergy_CT[i] = 0;
         wh_CT[i] = 0;   
     }
@@ -470,7 +457,7 @@ void EmonLibCM_Init(void)
     datalogPeriodInMainsCycles = datalog_period_in_seconds * cycles_per_second;  
     datalogEventPending = false;
     ADCsamples_per_datalog_period = datalog_period_in_seconds * MICROSPERSEC / ADCDuration;
-        // nominally a 0.16% at 1s, or 0.004% at 10 s truncation error by having this as an integer - insignificant 
+        // nominally a truncation error of 0.16% at 1s, or 0.004% at 10 s by having this as an integer - insignificant 
 #ifdef  SAMPPIN
     pinMode(SAMPPIN, OUTPUT);
     digitalWrite(SAMPPIN, LOW);
@@ -496,7 +483,7 @@ void EmonLibCM_Init(void)
 void EmonLibCM_Start(void)
 {
     firstcycle = true;
-    missing_Voltage = 0;
+    missing_VoltageSamples = 0;
     
     // Set up the ADC to be free-running 
     // 
@@ -536,7 +523,6 @@ void EmonLibCM_Start(void)
     
 }
 
-
 void EmonLibCM_StopADC(void)
 {
     // This stop function returns the ADC to default state
@@ -557,63 +543,48 @@ void EmonLibCM_StopADC(void)
 *
 ***************************************************************************************************/
 
-
 void EmonLibCM_get_readings()
 {
-    // Copy the variables passed through from the ISR.
-    // It is theoretically possible for the values being copied from to be rewritten
-    // by the ISR whilst this function is calculating the final values. This second
-    // layer of buffering removes that possibility.
+    // Use the 'volatile' variables passed from the ISR.
+
     double frequencyDeviation;
-    volatile int64_t  protected_sumPA[max_no_of_channels];
-    volatile int64_t  protected_sumPB[max_no_of_channels];
-    volatile uint64_t protected_sumIsquared[max_no_of_channels];
-    volatile int64_t  protected_cumI_deltas[max_no_of_channels];
+    
     cli();
- 
-    volatile long protected_sampleSetsDuringThisDatalogPeriod = copyOf_sampleSetsDuringThisDatalogPeriod;
-    volatile uint64_t protected_sum_Vsquared = copyOf_sum_Vsquared;
-    volatile int64_t  protected_cumV_deltas = copyOf_cumV_deltas;  
 
     for (int i=0; i<no_of_channels; i++) 
     {
-        if (ChannelInUse[i])
-        {
-            protected_sumPA[i] = copyOf_sumPA_CT[i];
-            protected_sumPB[i] = copyOf_sumPB_CT[i];
-            protected_sumIsquared[i] = copyOf_sumIsquared_CT[i];
-            protected_cumI_deltas[i] = copyOf_cumI_deltas[i];
-        }
-        else
-        {
-            protected_sumPA[i] = 0;
-            protected_sumPB[i] = 0;
-            protected_sumIsquared[i] = 0;
-            protected_cumI_deltas[i] = 0;
-        }
+      if (!ChannelInUse[i])
+      {
+          copyOf_sumPA_CT[i] = 0;
+          copyOf_sumPB_CT[i] = 0;
+          copyOf_sumIsquared_CT[i] = 0;
+          copyOf_cumI_deltas[i] = 0;
+      }
     }           
 
     if (PulseChange)
     {
-        if (PulseEnabled)
-        {
-            pinMode(PulsePin, INPUT_PULLUP);                              // Set interrupt pulse counting pin as input
-            attachInterrupt(PulseInterrupt, onPulse, RISING);             // Attach pulse counting interrupt  
-        }
-        else 
-            detachInterrupt(PulseInterrupt);                              // Detach pulse counting interrupt
-        PulseChange = false; 
+      if (PulseEnabled)
+      {
+          pinMode(PulsePin, INPUT_PULLUP);                              // Set interrupt pulse counting pin as input
+          attachInterrupt(PulseInterrupt, onPulse, RISING);             // Attach pulse counting interrupt  
+      }
+      else 
+      {
+          detachInterrupt(PulseInterrupt);                              // Detach pulse counting interrupt
+          PulseChange = false; 
+      }
     }
     
     if (pulses)                         // if the ISR has counted some pulses, update the total count
     {
         pulseCount += pulses;
-        pulses= 0;
+        pulses = 0;
     }
         
-    
     sei();
 
+    
     // Calculate the final values, scaling for the number of samples and applying calibration coefficients.
     // The final values are deposited in global variables for extraction by the 'getter' functions.
     
@@ -621,11 +592,11 @@ void EmonLibCM_get_readings()
     // Vrms still contains the fine voltage offset. Correct this by subtracting the "Offset V^2" before the sq. root.
     // Real Power is calculated by interpolating between the 'partial power' values, applying "trigonometric" coefficients to
     //  preserve the amplitude of the interpolated value.
-    Vrms = sqrt(((double)protected_sum_Vsquared / protected_sampleSetsDuringThisDatalogPeriod)
-                - ((double)protected_cumV_deltas * protected_cumV_deltas / protected_sampleSetsDuringThisDatalogPeriod / protected_sampleSetsDuringThisDatalogPeriod)); 
+    Vrms = sqrt(((double)copyOf_sum_Vsquared / copyOf_sampleSetsDuringThisDatalogPeriod)
+                - ((double)copyOf_cumV_deltas * copyOf_cumV_deltas / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod)); 
     Vrms *= voltageCal; 
     
-    frequencyDeviation = (double)ADCsamples_per_datalog_period / (protected_sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
+    frequencyDeviation = (double)ADCsamples_per_datalog_period / (copyOf_sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
     line_frequency = cycles_per_second * frequencyDeviation;
 
     for (int i=0; i<no_of_channels; i++)    // Current channels
@@ -638,18 +609,18 @@ void EmonLibCM_get_readings()
 
         
         // Apply combined phase & timing correction
-        sumRealPower = (protected_sumPA[i] * x[i] + protected_sumPB[i] * y[i]); 
+        sumRealPower = (copyOf_sumPA_CT[i] * x[i] + copyOf_sumPB_CT[i] * y[i]); 
                 
         // sumRealPower still contains the fine offsets of both V & I. Correct this by subtracting the "Offset Power": cumV_deltas * cumI_deltas
-        powerNow = (sumRealPower / protected_sampleSetsDuringThisDatalogPeriod - (double)protected_cumV_deltas * protected_cumI_deltas[i] 
-                   / protected_sampleSetsDuringThisDatalogPeriod / protected_sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
+        powerNow = (sumRealPower / copyOf_sampleSetsDuringThisDatalogPeriod - (double)copyOf_cumV_deltas * copyOf_cumI_deltas[i] 
+                   / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
       
         //  root of mean squares, removing fine offset
         //  The rms of a signal plus an offset is  sqrt( signal^2 + offset^2). 
-        //  Here (signal+offset)^2 = protected_sumIsquared / no of samples
+        //  Here (signal+offset)^2 = copyOf_sumIsquared_CT / no of samples
         //       offset = cumI_deltas / no of samples
-        Irms_CT[i] = sqrt(((double)protected_sumIsquared[i] / protected_sampleSetsDuringThisDatalogPeriod) - ((double)protected_cumI_deltas[i] * protected_cumI_deltas[i] / protected_sampleSetsDuringThisDatalogPeriod / protected_sampleSetsDuringThisDatalogPeriod)); 
- 
+        Irms_CT[i] = sqrt(((double)copyOf_sumIsquared_CT[i] / copyOf_sampleSetsDuringThisDatalogPeriod) - ((double)copyOf_cumI_deltas[i] * copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod));
+        
         Irms_CT[i] *= currentCal[i];    
     
         VA = Irms_CT[i] * Vrms;
@@ -684,8 +655,7 @@ bool EmonLibCM_Ready()
     
     if (datalogEventPending) 
     {
-        datalogEventPending = false;
-        
+        datalogEventPending = false;        
         EmonLibCM_get_readings();
         return true;
     }
@@ -716,6 +686,45 @@ void EmonLibCM_confirmPolarity()
     }
 }
 
+void calcPhaseShift(byte lChannel)
+{
+    /* Calculate the 'X' & 'Y' coefficients of phase shift for the c.t.
+    * phaseCal value supplied is the difference between VT lead and CT lead in degrees
+    * Add the delay due to the time taken by the ADC to convert one sample (ADCDuration),
+    * knowing the position of the current sample with respect to 
+    * the voltage, then convert to radians.
+    * x & y are the constants used in the power interpolation. (Sanity check: x + y ≈ 1)
+    */
+     
+    const double two_pi = 6.2831853;
+    double sampleRate = ADCDuration * (no_of_channels + 1) * two_pi * cycles_per_second / MICROSPERSEC; // in radians
+    double phase_shift = (phaseCal_CT[lChannel] / 360.0 + ADC_Sequence[lChannel+1] * 
+                           (double)ADCDuration * cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
+    y[lChannel] = sin(phase_shift) / sin(sampleRate);        
+    x[lChannel] = cos(phase_shift) - y[lChannel] * cos(sampleRate);
+}
+
+
+void calcTemperatureLead(void)
+{
+    /* Set lead time to start temperature conversion
+    * The temparature sensors are instructed to 'convert' the temperature just in time for the result
+    * to be available to be retrieved and reported along with the other data.
+    * The lead time is the number of cycles (or in the absence of ac, no. of samples) to allow after 
+    * datalogEventPending has been set to true, so that temperature conversion will complete just before 
+    * the next datalog event. Adjust the resolution if necessary so that conversion within one 
+    * datalogging period is possible.
+    */
+    
+    int conversionLeadTime = (CONVERSION_LEAD_TIME >> (3 - ((temperatureResolution & 0x70) >> 5)));  
+        // Should give 95 - 760 ms lead time, now convert to cycles (for a.c. present) or samples (for a.c. not present).
+    temperatureConversionDelayTime = datalogPeriodInMainsCycles - (long)conversionLeadTime * cycles_per_second / 1000 - 1; 
+        // '-1' to counter the effect of integer truncation, and make sure there is some spare time
+    temperatureConversionDelaySamples = ((unsigned long)(datalog_period_in_seconds * 1000.0) 
+        - (unsigned long)conversionLeadTime - 5) * 1000 / ADCDuration;
+        // '- 5' extra 5 ms to make sure there is some spare time
+}
+
 
 /**************************************************************************************************
 *
@@ -727,13 +736,13 @@ void EmonLibCM_confirmPolarity()
 
 void EmonLibCM_allGeneralProcessing_withinISR()
 {
-  if (stop) 
-      EmonLibCM_StopADC();
   /* This routine deals with activities that are only required at specific points
    * within each mains cycle.  It forms part of the ISR.
    */ 
-  static int cycleCountForDatalogging = 0;
-  // a simple routine for checking the performance of this new ISR structure     
+  if (stop) 
+      EmonLibCM_StopADC();
+  static unsigned int cycleCountForDatalogging = 0;
+  // a simple routine for checking the performance of this new ISR structure
 
   if (acPresent)
   {
@@ -746,7 +755,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
              * content for use by the main code.  The accumulators, and any associated
              * counters are then reset for use during the next period.
              */       
-            cycleCountForDatalogging ++;
+            cycleCountForDatalogging++;
             #ifdef INTEGRITY
                 if (sampleSetsDuringThisMainsCycle < lowestNoOfSampleSetsPerMainsCycle)
                 {
@@ -779,12 +788,11 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             if (cycleCountForDatalogging == temperatureConversionDelayTime  && firstcycle==false)
             {
                 // Only do it on this one cycle
-                // convertTemperatures();
                 startConvertTemperatures = true;
             }
             if (cycleCountForDatalogging >= datalogPeriodInMainsCycles && firstcycle==false) 
-            { 
-              cycleCountForDatalogging = 0;    
+            {
+              cycleCountForDatalogging = 0;
               for (int i=0; i<no_of_channels; i++) 
               {
                 copyOf_sumPA_CT[i] = sumPA_CT[i]; 
@@ -807,10 +815,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
               lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif
               
-              datalogEventPending = true;
-              
-              // Stops the sampling at the end of the cycle if EmonLibCM_Stop() has been called
-              // if (stop) EmonLibCM_StopADC();
+              datalogEventPending = true;           
             }
           } // end of processing that is specific to the first Vsample in each +ve half cycle   
       } // end of processing that is specific to samples where the voltage is positive
@@ -834,16 +839,16 @@ void EmonLibCM_allGeneralProcessing_withinISR()
 
     
     // Start temperature conversion
-    if (missing_Voltage > temperatureConversionDelaySamples && convertingTemperaturesNoAC == false)
+    if (missing_VoltageSamples > temperatureConversionDelaySamples && convertingTemperaturesNoAC == false)
     {
         // Only do it once per report
         startConvertTemperatures = true;
         convertingTemperaturesNoAC = true;
     }
     
-    if (missing_Voltage > ADCsamples_per_datalog_period) 
+    if (missing_VoltageSamples > ADCsamples_per_datalog_period) 
     {
-        missing_Voltage = 0;  // reset the missing samples count here.
+        missing_VoltageSamples = 0;  // reset the missing samples count here.
 
         firstcycle = true;    // firstcycle reset to true so that next reading
                               // with voltage signal starts from the right place
@@ -922,7 +927,7 @@ void EmonLibCM_interrupt()
     digitalWrite(SAMPPIN,LOW);
 #endif
   // Count ADC samples for timing when voltage is unavailable
-  missing_Voltage++;
+  missing_VoltageSamples++;
 
   
   if (sample_index==0)                                               // ADC_Sample 0 is always the voltage channel.
@@ -997,7 +1002,7 @@ void EmonLibCM_interrupt()
 
                                           
       static int lastRawSample[max_no_of_channels];  
-      if (rawSample > 5)                                                                 // process sample only if a plug is inserted
+      if (rawSample > 5)                                                                 // skip processing this sample if input is grounded
       {
         ChannelInUse[sample_index-1] = true;
        
@@ -1026,7 +1031,8 @@ void EmonLibCM_interrupt()
   }
   
   sample_index++; // advance the control flag
-  if (sample_index>no_of_channels) sample_index = 0;
+  if (sample_index>no_of_channels) 
+      sample_index = 0;
 }
 
 /**************************************************************************************************
@@ -1103,7 +1109,7 @@ void EmonLibCM_TemperatureEnable(bool _enable)
   //Setup and test for presence of DS18B20s, fill address array, set device resolution & write to EEPROM
 
   
-    if ( temperatureSensors == NULL || temperatures == NULL)
+    if (temperatureSensors == NULL || temperatures == NULL)
     {
         temperatureEnabled = false;                     // Could corrupt memory, try to limit damage
         numSensors = 0;
@@ -1123,18 +1129,25 @@ void EmonLibCM_TemperatureEnable(bool _enable)
 
         for(byte j=0; j<temperatureMaxCount; j++)
            temperatures[j] = UNUSED_TEMPERATURE;        // write 'Sensor never seen' marker to temperatures array
-
         sensors.begin();
-        if (keepAddresses)
+        if (keepAddresses && temperatureSensors[0][0] != 0x00)
+        {
             numSensors = temperatureMaxCount;
+            for (numSensors = temperatureMaxCount; numSensors > 0; numSensors--)
+            {
+                if (temperatureSensors[numSensors-1][0] == 0x28)             // 0x28 = signature of a DS18B20, so a pre-existing sensor
+                    break;
+              }
+        }
         else
         {
             numSensors = (sensors.getDeviceCount()); 
             if (numSensors > temperatureMaxCount)
                 numSensors = temperatureMaxCount;
         }
+
         byte j=0;                                       // search for one wire devices and copy to device address array.
-       
+        
         if (temperatureSensors[0][0] != 0x28)           // 0x28 = signature of a DS18B20, so a pre-existing array - do not search for sensors
             while ((j < numSensors) && (oneWire.search(temperatureSensors[j]))) 
                 j++;
@@ -1148,19 +1161,20 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         oneWire.write(COPY_SCRATCHPAD, true);
         delay(20);                                      // required by DS18B20
     }
+    else                                                // make sure power is turned off
+    {
+      if (DS18B20_PWR >= 0)
+      {
+          pinMode(DS18B20_PWR, OUTPUT);  
+          digitalWrite(DS18B20_PWR, LOW); 
+          pinMode(DS18B20_PWR, INPUT); 
+      }
+    }
     // Calculate number of cycles (or in the absence of ac, no. of samples) to allow after datalogEventPending has been set
     //  to true, so that temperature conversion will complete just before the next datalog event. Adjust the resolution if necessary
     //  so that conversion within one datalogging period is possible.
    
-    int conversionLeadTime = (CONVERSION_LEAD_TIME >> (3 - ((temperatureResolution & 0x70) >> 5)));  
-        // Should give 95 - 760 ms lead time, now convert to cycles (for a.c. present) or samples (for a.c. not present).
-    temperatureConversionDelayTime = datalogPeriodInMainsCycles - (long)conversionLeadTime * cycles_per_second / 1000 - 1; 
-        // '-1' to counter the effect of integer truncation, and make sure there is some spare time
-
-    temperatureConversionDelaySamples = ((unsigned long)(datalog_period_in_seconds * 1000.0) 
-        - (unsigned long)conversionLeadTime - 5) * 1000 / ADCDuration;
-        // '- 5' extra 5 ms to make sure there is some spare time
-    
+    calcTemperatureLead();    
 }
 
 void printTemperatureSensorAddresses(void)
@@ -1173,16 +1187,20 @@ void printTemperatureSensorAddresses(void)
     if (numSensors)
     {
         Serial.println(F(", with addresses..."));
-            for (int j=0; j< numSensors; j++)
+        for (int j=0; j< numSensors; j++)
+        {
+            for (int i=0; i<8; i++)
             {
-                for (int i=0; i<8; i++)
-                {
-                    Serial.print(temperatureSensors[j][i], 16);
-                    Serial.print(" ");
-                }
-                Serial.println();
-                delay(5);
+                if (temperatureSensors[j][i] < 0x10)
+                  Serial.print(F("0"));
+                Serial.print(temperatureSensors[j][i], 16);
+                Serial.print(F(" "));
             }
+            if (temperatureSensors[j][6] == 0x03)
+              Serial.print(F("Sensor may not be reliable"));
+            Serial.println();
+            delay(5);
+        }
     }
     Serial.println();
     Serial.print(F("Temperature measurement is"));
@@ -1217,17 +1235,13 @@ void retrieveTemperatures(void)
         {
             byte buf[9];
             int result;
-            if (datalog_period_in_seconds < 0.2)
-            {
-                temperatures[j] = BAD_TEMPERATURE;   // not enough time to get a reading
-                continue;
-            }
-
-            if (!oneWire.reset())
+            if ((datalog_period_in_seconds < 0.2)                      // not enough time to get a reading
+                || !oneWire.reset()
+                || !temperatureSensors[j][0])                          // invalid address
             {
                 temperatures[j] = BAD_TEMPERATURE;
                 continue;
-            }
+            }            
             else
             {
                 oneWire.write(MATCH_ROM);
@@ -1240,21 +1254,22 @@ void retrieveTemperatures(void)
 
             if(oneWire.crc8(buf,8)==buf[8])
             {
-                result=(buf[1]<<8)|buf[0];
+                result = (buf[1]<<8)|buf[0];
                 // result is temperature x16, multiply by 6.25 to convert to temperature x100
-                result=(result*6)+(result>>2);
+                result = (result*6)+(result>>2);
             }
-            else result=BAD_TEMPERATURE;
+            else result = BAD_TEMPERATURE;
+            if (buf[4] == 0)
+              result = BAD_TEMPERATURE;
             if (result != BAD_TEMPERATURE && (result < -5500 || result > 12500))
                 result = OUTOFRANGE_TEMPERATURE;
             temperatures[j] = result;
-            delay(5);
+            delay(1);
         }
-        if (DS18B20_PWR >= 0)
-        {
-            pinMode(DS18B20_PWR, OUTPUT);  
-            digitalWrite(DS18B20_PWR, LOW); 
-        }
+        for (byte j=numSensors; j < temperatureMaxCount; j++)
+          temperatures[j] = UNUSED_TEMPERATURE;
+        
+        digitalWrite(DS18B20_PWR, LOW); 
         convertingTemperaturesNoAC = false;
     }
 }
@@ -1285,30 +1300,35 @@ float EmonLibCM_getTemperature(char sensorNumber)
     return (temp/100.0);
 }
 
+
 /**************************************************************************************************
 *
-*   PULSE INPUT ISR
+*   'ADC COMPLETE' ISR
 *
 *
 ***************************************************************************************************/
-
 
 ISR(ADC_vect) 
 {
     EmonLibCM_interrupt();
 }
 
+/**************************************************************************************************
+*
+*   'PULSE INPUT' ISR
+*
+*
+***************************************************************************************************/
 // The pulse interrupt routine - runs each time a falling (leading) edge of a pulse is detected
 void onPulse()                  
 {
     if (PulseMinPeriod)
     {
-      if ((millis() - pulseTime) > PulseMinPeriod) {              // Check that contact bounce has finished
-        pulses++;
-      }
-      pulseTime=millis();                                         // No 'debounce' required - electronic switch presumed    
+        if ((millis() - pulseTime) > PulseMinPeriod)                // Check that contact bounce has finished
+            pulses++;
+        pulseTime=millis(); 
     }
-    else
+    else                                                          // No 'debounce' required - electronic switch presumed    
         pulses++;                   
 }
 
