@@ -11,9 +11,9 @@ Application Interface section of the User Documentation gives full details.
 */
 
 #include <Arduino.h>
-#include "emonLibCM.h"
+#include "emonLibCMx.h"
 
-#define RF69_COMPAT 1                                      //  Set to 1 if using RFM69CW, or 0 if using RFM12B
+#define RF69_COMPAT 0                                      //  Set to 1 if using RFM69CW, or 0 if using RFM12B
 #include <JeeLib.h>                                        //  https://github.com/jcw/jeelib - Tested with JeeLib 10 April 2017
 // ISR(WDT_vect) { Sleepy::watchdogEvent(); } 
 
