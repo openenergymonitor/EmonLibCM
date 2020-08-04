@@ -170,4 +170,7 @@ void loop()
         }   
     }
   }
+  else
+    rf12_recvDone();
+
 }
