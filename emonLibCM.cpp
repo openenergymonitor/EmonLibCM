@@ -83,7 +83,8 @@ double line_frequency;                                                 // Timed 
 int realPower_CT[max_no_of_channels];
 int apparentPower_CT[max_no_of_channels];
 double Irms_CT[max_no_of_channels];
-long wh_CT[max_no_of_channels];
+long wh_in_CT[max_no_of_channels];                                     // Watt-hours in  (+ve flows) 
+long wh_out_CT[max_no_of_channels];                                    // Watt-hours out (-ve flows, e.g Solar PV)
 double pf[max_no_of_channels];
 double Vrms;
 volatile boolean ChannelInUse[max_no_of_channels];
@@ -230,7 +231,8 @@ polarities polarityUnconfirmed;
 polarities polarityConfirmed;                       // for improved zero-crossing detection
 polarities polarityConfirmedOfLastSampleV;          // for zero-crossing detection
 
-float residualEnergy_CT[max_no_of_channels];
+float residualEnergy_in_CT[max_no_of_channels];      // Residual energy in (rounded off) to be added next time around
+float residualEnergy_out_CT[max_no_of_channels];     // Residual energy out (rounded off) to be added next time around
 double x[max_no_of_channels], y[max_no_of_channels]; // coefficients for real power interpolation
 
 
@@ -402,7 +404,17 @@ double EmonLibCM_getLineFrequency(void)
 
 long EmonLibCM_getWattHour(int channel)
 {
-    return wh_CT[channel];
+    return wh_in_CT[channel] - wh_out_CT[channel];
+}
+
+long EmonLibCM_getWattHourIn(int channel)
+{
+    return wh_in_CT[channel];
+}
+
+long EmonLibCM_getWattHourOut(int channel)
+{
+    return wh_out_CT[channel];
 }
 
 unsigned long EmonLibCM_getPulseCount(void)
@@ -448,8 +460,10 @@ void EmonLibCM_Init(void)
     {
         currentCal[i] = currentCal[i] * Vref / ADC_Counts;  
         calcPhaseShift(i);
-        residualEnergy_CT[i] = 0;
-        wh_CT[i] = 0;   
+        residualEnergy_out_CT[i] = 0;
+        residualEnergy_in_CT[i] = 0;
+        wh_in_CT[i] = 0;   
+        wh_out_CT[i] = 0;   
     }
 
     EmonLibCM_Start();
@@ -630,11 +644,27 @@ void EmonLibCM_get_readings()
           pf[i] = 0.0;
         realPower_CT[i] = powerNow + 0.5;                                                       // rounded to nearest Watt
         apparentPower_CT[i]   = VA + 0.5;                                                       // rounded to nearest VA
-        energyNow = (powerNow * datalog_period_in_seconds / frequencyDeviation)                 // correct for mains time != clock time
-          + residualEnergy_CT[i];                                                               // fp for accuracy
+        energyNow = (powerNow * datalog_period_in_seconds / frequencyDeviation);                // correct for mains time != clock time
+
+        long* wh_CT;
+        float* residualEnergy_CT;
+
+        if( energyNow >= 0 )
+        {
+            wh_CT = &wh_in_CT[i];
+            residualEnergy_CT = &residualEnergy_in_CT[i];
+        } 
+        else 
+        {
+            wh_CT = &wh_out_CT[i];
+            residualEnergy_CT = &residualEnergy_out_CT[i];
+            energyNow = -energyNow;                                                             // Invert, always store +ve values.
+        }
+
+        energyNow += *residualEnergy_CT;                                                        // fp for accuracy
         wattHoursRecent = energyNow / 3600;                                                     // integer assignment to extract whole Wh
-        wh_CT[i]+= wattHoursRecent;                                                             // accumulated WattHours since start-up
-        residualEnergy_CT[i] = energyNow - (wattHoursRecent * 3600.0);                          // fp for accuracy
+        *wh_CT += wattHoursRecent;                                                              // accumulated WattHours since start-up
+        *residualEnergy_CT = energyNow - (wattHoursRecent * 3600.0);                            // fp for accuracy        
     }
    
     //  Retrieve the temperatures, which should be stored inside each sensor

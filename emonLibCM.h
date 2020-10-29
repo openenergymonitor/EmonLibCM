@@ -102,6 +102,8 @@ double EmonLibCM_getVrms(void);
 double EmonLibCM_getDatalog_period(void);
 double EmonLibCM_getLineFrequency(void);
 long EmonLibCM_getWattHour(int channel);
+long EmonLibCM_getWattHourIn(int channel);
+long EmonLibCM_getWattHourOut(int channel);
 unsigned long EmonLibCM_getPulseCount(void);
 
 
