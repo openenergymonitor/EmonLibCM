@@ -2,7 +2,7 @@
   "name": "EmonLibCM",
   "keywords": "electricity, energy, monitoring",
   "description": "Energy Monitoring Continuous Sampling Library",
-  "version": "2.4.1",
+  "version": "2.1.0",
   "repository":
   {
     "type": "git",

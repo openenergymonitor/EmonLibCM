@@ -21,6 +21,7 @@
 // Version 2.02 13/07/2019  getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
 // Version 2.03 25/10/2019  getLineFrequency( ), setADC_VRef( ) added.
 // Version 2.04  1/08/2020  getDatalog_period( ) added.
+// Version 2.1.0 9/7/2020  2nd pulse input added. Array of structs was individual variables. Set watthour and pulse count added.
 
 
 
@@ -42,13 +43,11 @@
 
 // Dallas DS18B20 libraries & commands
 
-#include <Wire.h>
 #include <SPI.h>
 #include <util/crc16.h>
 #include <OneWire.h>
-#include <DallasTemperature.h>                                         //http://download.milesburton.com/Arduino/MaximTemperature/DallasTemperature_LATEST.zip
 
-
+#define DS18B20SIG 0x28
 #define SKIP_ROM 0xCC 
 #define MATCH_ROM 0x55
 #define CONVERT_TEMPERATURE 0x44
@@ -86,10 +85,17 @@ void EmonLibCM_setADC_VRef(byte _ADCRef);
 void EmonLibCM_ReCalibrate_VChannel(double _amplitudeCal);
 void EmonLibCM_ReCalibrate_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal);
 
+void EmonLibCM_setAssumedVrms(double _assumedVrms);
+void EmonLibCM_setWattHour(byte channel, long _wh);
+void EmonLibCM_setPulseCount(long _pulseCount);
+void EmonLibCM_setPulseCount(byte channel, long _pulseCount);
+void EmonLibCM_setPulseEnable(byte channel, bool _enable);
 void EmonLibCM_setPulseEnable(bool _enable);
 void EmonLibCM_setPulsePin(int _pin);
-void EmonLibCM_setPulsePin(int _pin, int _interrupt);
+void EmonLibCM_setPulsePin(byte channel, int _pin, int _interrupt);
+void EmonLibCM_setPulsePin(byte channel, int _pin);
 void EmonLibCM_setPulseMinPeriod(int _periodwidth);
+void EmonLibCM_setPulseMinPeriod(byte channel, int _periodwidth);
 
 bool EmonLibCM_acPresent(void);
 
@@ -99,10 +105,12 @@ int EmonLibCM_getApparentPower(int channel);
 double EmonLibCM_getPF(int channel);
 double EmonLibCM_getIrms(int channel);
 double EmonLibCM_getVrms(void);
+double EmonLibCM_getAssumedVrms(void);
 double EmonLibCM_getDatalog_period(void);
 double EmonLibCM_getLineFrequency(void);
 long EmonLibCM_getWattHour(int channel);
 unsigned long EmonLibCM_getPulseCount(void);
+unsigned long EmonLibCM_getPulseCount(byte channel);
 
 
 void EmonLibCM_setTemperatureDataPin(byte _dataPin);
@@ -114,7 +122,7 @@ void EmonLibCM_setTemperatureArray(int *temperatureArray);
 void EmonLibCM_setTemperatureMaxCount(int _maxCount);
 void EmonLibCM_TemperatureEnable(bool _enable);
 bool EmonLibCM_getTemperatureEnabled(void);
-void printTemperatureSensorAddresses(void);
+void printTemperatureSensorAddresses(bool emonPi=false);
 void printTemperatureSensorsEnabled(void);
 void convertTemperatures(void);
 void retrieveTemperatures(void);

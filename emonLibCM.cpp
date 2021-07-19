@@ -27,23 +27,30 @@
 //                            ADC reference source was AVcc and not selectable - ability to select [setADC_VRef( )] added, 
 //                            sampleSetsDuringThisDatalogPeriod (and derivatives) was samplesDuringThisDatalogPeriod etc,
 //                            Energy calculation changed to use internal clock rather than mains time by addition of "frequencyDeviation".
-// Version 2.04 1/8/2020     In examples, 'else' added to "if (EmonLibCM_Ready())" to keep JeeLib alive. Example for RFM69CW only ('Classic' format) and 
-//                           not using JeeLib added.
-//                           getDatalog_period( ) added. Temperature array is now ignored if first device is not a DS18B20. 'BAD_TEMPERATURE' now returned if
-//                           sensor address is made invalid during operation. Array above is sensor count is filled with UNUSED_TEMPERATURE. Superfluous 'if' 
-//                           removed at end of retrieveTemperatures() - power pin is now set low regardless. 'else' added to 'if' in
-//                           (if (temperatureEnabled = _enable)) in TemperatureEnable( ) to ensure power is off if not required, delay after retrieving 
-//                           a temperature was 5 ms. 
-//                           unsigned long missing_VoltageSamples (was "missing_Voltage"), bool firstcycle were not volatile, unnecessary copies of 
-//                           'protected' variables removed, datalog period was set only at startup & minimum limit added. cycleCountForDatalogging, 
-//                           min_startup_cycles were signed. 
-//                           (Plus some cosmetic changes)
+// Version 2.04 1/8/2020    In examples, 'else' added to "if (EmonLibCM_Ready())" to keep JeeLib alive. Example for RFM69CW only ('Classic' format) and 
+//                            not using JeeLib added.
+//                            getDatalog_period( ) added. Temperature array is now ignored if first device is not a DS18B20. 'BAD_TEMPERATURE' now returned if
+//                            sensor address is made invalid during operation. Array above is sensor count is filled with UNUSED_TEMPERATURE. Superfluous 'if' 
+//                            removed at end of retrieveTemperatures() - power pin is now set low regardless. 'else' added to 'if' in
+//                            (if (temperatureEnabled = _enable)) in TemperatureEnable( ) to ensure power is off if not required, delay after retrieving 
+//                            a temperature was 5 ms. 
+//                            unsigned long missing_VoltageSamples (was "missing_Voltage"), bool firstcycle were not volatile, unnecessary copies of 
+//                            'protected' variables removed, datalog period was set only at startup & minimum limit added. cycleCountForDatalogging, 
+//                            min_startup_cycles were signed. 
+//                            (Plus some cosmetic changes)
+// Version 2.1.0 9/7/2021   2nd pulse input added, array of structs was individual variables. N.B. The definition setPulsePin(byte channel, int _pin) 
+//                            is incompatible with the old definition of setPulsePin(int _pin, int _interrupt). Solution for 85 °C problem added, 
+//                            special print format for emonPi added.  'Setters' to initialise Wh counters & pulse count added. If no a.c. voltage, 
+//                            now uses assumed Vrms to calculate power, VA & energy, p.f. and frequency both report zero. Error in phase shift calculation 
+//                            meant wrong correction was applied when ct's were sampled out of sequence.
+//  
 
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
 
 // #define SAMPPIN 5           // EmonTx: Preferred pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define SAMPPIN 19          // EmonTx: Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
+// #define INTPINS             // Debugging print of interrupt allocations
 
 #include "emonLibCM.h"
 
@@ -74,7 +81,7 @@ byte no_of_Iinputs = 0;
 
 // for general interaction between the main code and the ISR
 volatile boolean datalogEventPending;
-volatile unsigned long missing_VoltageSamples = 0;                            // provides a timebase mechanism for current-only use
+volatile unsigned long missing_VoltageSamples = 0;                     // provides a timebase mechanism for current-only use
                                                                        //  - uses the ADC free-running rate as a clock.
 double line_frequency;                                                 // Timed from sample rate & cycle count
 
@@ -83,11 +90,11 @@ double line_frequency;                                                 // Timed 
 int realPower_CT[max_no_of_channels];
 int apparentPower_CT[max_no_of_channels];
 double Irms_CT[max_no_of_channels];
-long wh_CT[max_no_of_channels];
+long wh_CT[max_no_of_channels] = {0, 0, 0, 0, 0};
 double pf[max_no_of_channels];
 double Vrms;
 volatile boolean ChannelInUse[max_no_of_channels];
-static byte lChannel[max_no_of_channels+1];
+static byte lChannel[max_no_of_channels+1];                            // logical current channel no. (0-based)
     
 // analogue ports
 static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5};        // <-- Sequence in which the analogue ports are scanned, first is Voltage, remainder are currents
@@ -97,17 +104,25 @@ double Vref = 3.3;                                                     // ADC Re
 int ADCDuration = 104;                                                 // Time in microseconds for one ADC conversion = 104 for 16 MHz clock 
 byte ADCRef = VREF_NORMAL  << 6;                                       // ADC Reference: VREF_EXTERNAL, VREF_NORMAL = AVcc, VREF_INTERNAL = Internal 1.1 V
 
-// Pulse Counting;
-bool PulseEnabled = false;
-bool PulseChange = false;                                              // track change of state of counting
-byte PulsePin = 3;                                                     // default to DI3 for the emonTx V3
-byte PulseInterrupt = 1;                                               // default to int1 for the emonTx V3
-unsigned long PulseMinPeriod = 110;                                    // default to 110 ms
-unsigned long pulseCount = 0;                                          // Total number of pulses from switch-on 
-volatile unsigned long pulses = 0;                                     // Incremental number of pulses between readings
-unsigned long pulseTime;                                               // Instant of the last pulse - used for debounce logic
-void onPulse();                                                        // pulse time of arrival
+// Pulse Counting
 
+#define PULSEINPUTS 2                // No of available interrupts for pulse counting (2 is the maximum, add more "onPulse..." functions for more)
+
+struct pulse {
+
+  bool PulseEnabled = false;
+  bool PulseChange = false;                                            // track change of state of counting
+  void (*pulseISR)();
+  byte PulsePin = 3;                                                   // default to DI3 for the emonTx V3
+  byte PulseInterrupt = 1;                                             // default to int1 for the emonTx V3
+  unsigned long PulseMinPeriod = 110;                                  // default to 110 ms
+  unsigned long pulseCount = 0;                                        // Total number of pulses from switch-on 
+  volatile unsigned long pulseIncrement = 0;                           // Incremental number of pulses between readings
+  unsigned long pulseTime;                                             // Instant of the last pulse - used for debounce logic
+} pulses[PULSEINPUTS];
+
+void onPulse(byte channel);                                            // General pulse handler
+void onPulse0(), onPulse1();                                           // Individual pulse handlers - one per interrupt
 
 // Set-up values
 //--------------
@@ -192,6 +207,7 @@ volatile bool firstcycle = true;
 unsigned int samplesDuringThisCycle;
 bool acPresent = false;                             // TRUE when ac voltage input is detected.
 unsigned int acDetectedThreshold = ADC_Counts >> 5; // ac voltage detection threshold, ~10% of nominal voltage (given large amount of ripple)
+double assumedVrms = 240.0;
 
 unsigned int datalogPeriodInMainsCycles;
 unsigned long ADCsamples_per_datalog_period;
@@ -242,7 +258,6 @@ char DS18B20_PWR = -1;                              // Power pin for DS18B20 tem
 
 // Global variables used only inside the library
 OneWire oneWire(W1Pin);
-DallasTemperature sensors(&oneWire);
 bool temperatureEnabled = false;
 byte numSensors = 0;
 byte temperatureResolution = TEMPRES_11;
@@ -329,27 +344,67 @@ void EmonLibCM_setADC_VRef(byte _ADCRef)
 
 void EmonLibCM_setPulseEnable(bool _enable)
 {
-    PulseEnabled = _enable;
-    PulseChange = true;
+    pulses[0].PulseEnabled = _enable;
+    pulses[0].PulseChange = true;
 }
 
-void EmonLibCM_setPulsePin(int _pin, int _interrupt)
+void EmonLibCM_setPulseEnable(byte channel, bool _enable)
 {
-    PulsePin = _pin;
-    PulseInterrupt = _interrupt;
+    pulses[channel].PulseEnabled = _enable;
+    pulses[channel].PulseChange = true;
 }
 
 void EmonLibCM_setPulsePin(int _pin)
 {
-    PulsePin = _pin;
-    PulseInterrupt = digitalPinToInterrupt(PulsePin);
+    pulses[0].PulsePin = _pin;
+    pulses[0].PulseInterrupt = digitalPinToInterrupt(_pin);
 }
 
+void EmonLibCM_setPulsePin(byte channel, int _pin, int _interrupt)
+{
+    pulses[channel].PulsePin = _pin;
+    pulses[channel].PulseInterrupt = _interrupt;
+}
+
+void EmonLibCM_setPulsePin(byte channel, int _pin)
+{
+    if (channel != 0 || channel != 1)  // Attempt to deal with incompatibility with prior versions
+    {
+      _pin = channel;
+      channel = 0;
+    }
+    pulses[channel].PulsePin = _pin;
+    pulses[channel].PulseInterrupt = digitalPinToInterrupt(_pin);
+}
 void EmonLibCM_setPulseMinPeriod(int _period)
 {
-    PulseMinPeriod = _period;
+    pulses[0].PulseMinPeriod = _period;
 }
 
+void EmonLibCM_setPulseMinPeriod(byte channel, int _period)
+{
+    pulses[channel].PulseMinPeriod = _period;
+}
+
+void EmonLibCM_setPulseCount(long _pulseCount)
+{
+    pulses[0].pulseCount = _pulseCount;                 
+}
+
+void EmonLibCM_setPulseCount(byte channel, long _pulseCount)
+{
+    pulses[channel].pulseCount = _pulseCount;                
+}
+
+void EmonLibCM_setAssumedVrms(double _assumedVrms)
+{
+    assumedVrms = _assumedVrms;
+}
+
+void EmonLibCM_setWattHour(byte channel, long _wh)
+{
+    wh_CT[channel] = _wh;
+}
 
 void EmonLibCM_ADCCal(double _Vref)
 {
@@ -387,6 +442,11 @@ double EmonLibCM_getVrms(void)
     return Vrms;
 }
 
+double EmonLibCM_getAssumedVrms(void)
+{
+    return assumedVrms;
+}
+
 double EmonLibCM_getDatalog_period(void)
 {
     return datalog_period_in_seconds;
@@ -407,7 +467,12 @@ long EmonLibCM_getWattHour(int channel)
 
 unsigned long EmonLibCM_getPulseCount(void)
 {
-    return pulseCount;
+    return pulses[0].pulseCount;
+}
+
+unsigned long EmonLibCM_getPulseCount(byte channel)
+{
+    return pulses[channel].pulseCount;
 }
 
 int EmonLibCM_getLogicalChannel(byte ADC_Input)
@@ -449,7 +514,6 @@ void EmonLibCM_Init(void)
         currentCal[i] = currentCal[i] * Vref / ADC_Counts;  
         calcPhaseShift(i);
         residualEnergy_CT[i] = 0;
-        wh_CT[i] = 0;   
     }
 
     EmonLibCM_Start();
@@ -463,12 +527,27 @@ void EmonLibCM_Init(void)
     digitalWrite(SAMPPIN, LOW);
 #endif
 
-
-    if (PulseEnabled)
+    for (byte channel = 0; channel < PULSEINPUTS; channel++)
     {
-        pinMode(PulsePin, INPUT_PULLUP);                              // Set interrupt pulse counting pin as input
-        attachInterrupt(PulseInterrupt, onPulse, RISING);             // Attach pulse counting interrupt pulse counting,  
+
+        if (pulses[channel].PulseEnabled)
+        {
+            pinMode(pulses[channel].PulsePin, INPUT_PULLUP);               // Set interrupt pulse counting pin as input & attach interrupt
+            if (channel == 0)
+              attachInterrupt(pulses[channel].PulseInterrupt, onPulse0, RISING);
+            if (channel == 1)
+              attachInterrupt(pulses[channel].PulseInterrupt, onPulse1, RISING);
+        }
+#ifdef INTPINS        
+  Serial.print("Ch: ");Serial.println(channel);
+  Serial.print(" en: ");Serial.println(pulses[channel].PulseEnabled);
+  Serial.print(" pin: ");Serial.println(pulses[channel].PulsePin);
+  Serial.print(" int: ");Serial.println(pulses[channel].PulseInterrupt);
+  Serial.print(" pin3, int: ");Serial.println(digitalPinToInterrupt(3));
+  Serial.print(" pin2, int: ");Serial.println(digitalPinToInterrupt(2));
+#endif
     }
+
      
 }
 
@@ -482,6 +561,10 @@ void EmonLibCM_Init(void)
 
 void EmonLibCM_Start(void)
 {
+  
+    pulses[0].pulseISR = onPulse0;
+    pulses[1].pulseISR = onPulse1;
+    
     firstcycle = true;
     missing_VoltageSamples = 0;
     
@@ -562,26 +645,31 @@ void EmonLibCM_get_readings()
       }
     }           
 
-    if (PulseChange)
+    for (byte channel = 0; channel < PULSEINPUTS; channel++)
     {
-      if (PulseEnabled)
-      {
-          pinMode(PulsePin, INPUT_PULLUP);                              // Set interrupt pulse counting pin as input
-          attachInterrupt(PulseInterrupt, onPulse, RISING);             // Attach pulse counting interrupt  
-      }
-      else 
-      {
-          detachInterrupt(PulseInterrupt);                              // Detach pulse counting interrupt
-          PulseChange = false; 
-      }
+        if (pulses[channel].PulseChange)
+        {
+          if (pulses[channel].PulseEnabled)
+          {
+              pinMode(pulses[channel].PulsePin, INPUT_PULLUP);         // Set interrupt pulse counting pin as input & attach interrupt
+              if (channel == 0)
+                attachInterrupt(pulses[channel].PulseInterrupt, onPulse0, RISING);
+              if (channel == 1)
+                attachInterrupt(pulses[channel].PulseInterrupt, onPulse1, RISING);              
+          }
+          else 
+          {
+              detachInterrupt(pulses[channel].PulseInterrupt);         // Detach pulse counting interrupt
+              pulses[channel].PulseChange = false; 
+          }
+        }
+        if (pulses[channel].pulseIncrement)                        // if the ISR has counted some pulses, update the total count
+        {
+            pulses[channel].pulseCount += pulses[channel].pulseIncrement;
+            pulses[channel].pulseIncrement = 0;
+        }
     }
     
-    if (pulses)                         // if the ISR has counted some pulses, update the total count
-    {
-        pulseCount += pulses;
-        pulses = 0;
-    }
-        
     sei();
 
     
@@ -623,15 +711,30 @@ void EmonLibCM_get_readings()
         
         Irms_CT[i] *= currentCal[i];    
     
-        VA = Irms_CT[i] * Vrms;
-        
-        pf[i] = powerNow / VA;
-        if (pf[i] > 1.05 || pf[i] < -1.05 || isnan(pf[i]))
+        if (acPresent)
+        {
+          VA = Irms_CT[i] * Vrms;
+          
+          pf[i] = powerNow / VA;
+          if (pf[i] > 1.05 || pf[i] < -1.05 || isnan(pf[i]))
+            pf[i] = 0.0;
+
+          realPower_CT[i] = powerNow + 0.5;                                                       // rounded to nearest Watt
+          apparentPower_CT[i]   = VA + 0.5;                                                       // rounded to nearest VA
+          energyNow = (powerNow * datalog_period_in_seconds / frequencyDeviation)                 // correct for mains time != clock time
+            + residualEnergy_CT[i];                                                               // fp for accuracy
+        }
+        else
+        {
+          VA = Irms_CT[i] * assumedVrms;
+          
           pf[i] = 0.0;
-        realPower_CT[i] = powerNow + 0.5;                                                       // rounded to nearest Watt
-        apparentPower_CT[i]   = VA + 0.5;                                                       // rounded to nearest VA
-        energyNow = (powerNow * datalog_period_in_seconds / frequencyDeviation)                 // correct for mains time != clock time
-          + residualEnergy_CT[i];                                                               // fp for accuracy
+
+          realPower_CT[i] = VA + 0.5;                                                     // rounded to nearest Watt
+          apparentPower_CT[i]   = VA + 0.5;                                                     // rounded to nearest VA
+          energyNow = (VA * datalog_period_in_seconds / frequencyDeviation)                 // correct for mains time != clock time
+            + residualEnergy_CT[i];                                                               // fp for accuracy
+        }
         wattHoursRecent = energyNow / 3600;                                                     // integer assignment to extract whole Wh
         wh_CT[i]+= wattHoursRecent;                                                             // accumulated WattHours since start-up
         residualEnergy_CT[i] = energyNow - (wattHoursRecent * 3600.0);                          // fp for accuracy
@@ -698,8 +801,9 @@ void calcPhaseShift(byte lChannel)
      
     const double two_pi = 6.2831853;
     double sampleRate = ADCDuration * (no_of_channels + 1) * two_pi * cycles_per_second / MICROSPERSEC; // in radians
-    double phase_shift = (phaseCal_CT[lChannel] / 360.0 + ADC_Sequence[lChannel+1] * 
-                           (double)ADCDuration * cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
+    double phase_shift = (phaseCal_CT[lChannel] / 360.0 + (lChannel+1) * ADCDuration 
+                           * (double)cycles_per_second/MICROSPERSEC) * two_pi;                // Total phase shift in radians
+                                                                                              // (lChannel+1) was ADC_Sequence[lChannel+1]
     y[lChannel] = sin(phase_shift) / sin(sampleRate);        
     x[lChannel] = cos(phase_shift) - y[lChannel] * cos(sampleRate);
 }
@@ -837,7 +941,6 @@ void EmonLibCM_allGeneralProcessing_withinISR()
     // duration of the datalog period, at which point it will make the readings available.
     // The reporting interval is now dependent on the processor's internal clock
 
-    
     // Start temperature conversion
     if (missing_VoltageSamples > temperatureConversionDelaySamples && convertingTemperaturesNoAC == false)
     {
@@ -878,7 +981,6 @@ void EmonLibCM_allGeneralProcessing_withinISR()
         copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
         // lowestNoOfSampleSetsPerMainsCycle = 999;
 #endif        
-
         datalogEventPending = true;
 
         // Stops the sampling at the end of the cycle if EmonLibCM_Stop() has been called
@@ -950,7 +1052,6 @@ void EmonLibCM_interrupt()
       acSense -= acSense >> 2;
       acSense += sampleV_minusDC > 0 ? sampleV_minusDC : -sampleV_minusDC;
       acPresent = acSense > acDetectedThreshold;
-      
       //
       // deal with activities that are only needed at certain stages of each  
       // voltage cycle.
@@ -1107,7 +1208,7 @@ void EmonLibCM_setTemperatureMaxCount(int _maxCount)
 void EmonLibCM_TemperatureEnable(bool _enable)
 {
   //Setup and test for presence of DS18B20s, fill address array, set device resolution & write to EEPROM
-
+    DeviceAddress deviceAddress;
   
     if (temperatureSensors == NULL || temperatures == NULL)
     {
@@ -1128,27 +1229,30 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         scratchpad[2] = temperatureResolution;          // resolution
 
         for(byte j=0; j<temperatureMaxCount; j++)
-           temperatures[j] = UNUSED_TEMPERATURE;        // write 'Sensor never seen' marker to temperatures array
-        sensors.begin();
+            temperatures[j] = UNUSED_TEMPERATURE;        // write 'Sensor never seen' marker to temperatures array
+        oneWire.reset_search();
+        numSensors = 0;
+        while (oneWire.search(deviceAddress)) 
+            if (deviceAddress[0] == DS18B20SIG)
+                numSensors++;
         if (keepAddresses && temperatureSensors[0][0] != 0x00)
         {
             numSensors = temperatureMaxCount;
             for (numSensors = temperatureMaxCount; numSensors > 0; numSensors--)
             {
-                if (temperatureSensors[numSensors-1][0] == 0x28)             // 0x28 = signature of a DS18B20, so a pre-existing sensor
+                if (temperatureSensors[numSensors-1][0] == DS18B20SIG)       // signature of a DS18B20, so a pre-existing sensor
                     break;
-              }
+            }
         }
         else
         {
-            numSensors = (sensors.getDeviceCount()); 
             if (numSensors > temperatureMaxCount)
                 numSensors = temperatureMaxCount;
         }
 
         byte j=0;                                       // search for one wire devices and copy to device address array.
         
-        if (temperatureSensors[0][0] != 0x28)           // 0x28 = signature of a DS18B20, so a pre-existing array - do not search for sensors
+        if (temperatureSensors[0][0] != DS18B20SIG)     // not a signature of a DS18B20, so not a pre-existing array - search for sensors
             while ((j < numSensors) && (oneWire.search(temperatureSensors[j]))) 
                 j++;
         oneWire.reset();                                // write resolution to scratchpad 
@@ -1177,8 +1281,10 @@ void EmonLibCM_TemperatureEnable(bool _enable)
     calcTemperatureLead();    
 }
 
-void printTemperatureSensorAddresses(void)
+void printTemperatureSensorAddresses(bool emonPi)
 {
+    if (emonPi)
+      Serial.print(F("|"));
     Serial.print(F("Temperature Sensors found = "));
     Serial.print(numSensors);
     Serial.print(" of ");
@@ -1189,6 +1295,8 @@ void printTemperatureSensorAddresses(void)
         Serial.println(F(", with addresses..."));
         for (int j=0; j< numSensors; j++)
         {
+            if (emonPi)
+              Serial.print(F("|"));
             for (int i=0; i<8; i++)
             {
                 if (temperatureSensors[j][i] < 0x10)
@@ -1201,11 +1309,17 @@ void printTemperatureSensorAddresses(void)
             Serial.println();
             delay(5);
         }
+        if (emonPi)
+          Serial.print(F("|"));
     }
     Serial.println();
+    if (emonPi)
+      Serial.print(F("|"));
     Serial.print(F("Temperature measurement is"));
     Serial.print(temperatureEnabled?"":" NOT");
     Serial.println(F(" enabled."));
+    if (emonPi)
+      Serial.print(F("|"));
     Serial.println();
     delay(5);
         
@@ -1261,6 +1375,8 @@ void retrieveTemperatures(void)
             else result = BAD_TEMPERATURE;
             if (buf[4] == 0)
               result = BAD_TEMPERATURE;
+            if (buf[6] ==  0x0C && result == 8500)  // not genuine 85 °C
+              result = BAD_TEMPERATURE;
             if (result != BAD_TEMPERATURE && (result < -5500 || result > 12500))
                 result = OUTOFRANGE_TEMPERATURE;
             temperatures[j] = result;
@@ -1315,21 +1431,30 @@ ISR(ADC_vect)
 
 /**************************************************************************************************
 *
-*   'PULSE INPUT' ISR
+*   'PULSE INPUT' ISRs
 *
 *
 ***************************************************************************************************/
-// The pulse interrupt routine - runs each time a falling (leading) edge of a pulse is detected
-void onPulse()                  
+// The pulse interrupt routines - run each time a rising edge of a pulse is detected
+  
+void onPulse0(void) 
 {
-    if (PulseMinPeriod)
-    {
-        if ((millis() - pulseTime) > PulseMinPeriod)                // Check that contact bounce has finished
-            pulses++;
-        pulseTime=millis(); 
-    }
-    else                                                          // No 'debounce' required - electronic switch presumed    
-        pulses++;                   
+    onPulse(0);
 }
 
- 
+void onPulse1(void) 
+{
+    onPulse(1);
+}
+
+void onPulse(byte channel)  
+{         
+    if (pulses[channel].PulseMinPeriod)
+    {
+        if ((millis() - pulses[channel].pulseTime) > pulses[channel].PulseMinPeriod)                   // Check that contact bounce has finished
+            pulses[channel].pulseIncrement++;
+        pulses[channel].pulseTime=millis(); 
+    }
+    else                                                               // No 'debounce' required - electronic switch presumed    
+        pulses[channel].pulseIncrement++;                   
+}
