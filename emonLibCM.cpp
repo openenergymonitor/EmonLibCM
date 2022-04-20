@@ -52,6 +52,8 @@
 // #define SAMPPIN 19          // EmonTx: Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define INTPINS             // Debugging print of interrupt allocations
 
+#define AVRDB                  // Need to be able to set this from main sketch ??
+
 #include "emonLibCM.h"
 
 #if defined(ARDUINO) && ARDUINO >= 100
@@ -335,6 +337,9 @@ void EmonLibCM_setADC(int _ADCBits,  int _ADCDuration)
 {
     ADCBits = _ADCBits;
     ADCDuration = _ADCDuration;
+    
+    ADC_Counts = 1 << ADCBits;
+    acDetectedThreshold = ADC_Counts >> 5;
 }
 
 void EmonLibCM_setADC_VRef(byte _ADCRef)
@@ -567,6 +572,20 @@ void EmonLibCM_Start(void)
     
     firstcycle = true;
     missing_VoltageSamples = 0;
+
+#ifdef AVRDB         
+    // Set up the ADC to be free-running    
+    //VREF.ADC0REF = VREF_REFSEL_VREFA_gc;
+    VREF.ADC0REF = VREF_REFSEL_1V024_gc;
+    ADC0.CTRLC = ADC_PRESC_DIV32_gc;
+    ADC0.CTRLA = ADC_ENABLE_bm;
+    ADC0.CTRLA |= ADC_RESSEL_12BIT_gc;
+    ADC0.CTRLA |= ADC_FREERUN_bm;
+    ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc;
+    ADC0.INTCTRL |= ADC_RESRDY_bm;
+
+    ADC0.COMMAND = ADC_STCONV_bm;
+#else
     
     // Set up the ADC to be free-running 
     // 
@@ -600,20 +619,25 @@ void EmonLibCM_Start(void)
                            // to one and the I-bit in SREG is set, the 
                            // ADC Conversion Complete Interrupt is activated. 
 
-    ADCSRA |= (1<<ADSC);   // start ADC manually first time 
+    ADCSRA |= (1<<ADSC);   // start ADC manually first time
+
+#endif
+
     sei();                 // Enable Global Interrupts
-    
-    
 }
 
 void EmonLibCM_StopADC(void)
 {
+#ifdef AVRDB         
+
+#else
     // This stop function returns the ADC to default state
     ADCSRA  = (1<<ADPS0)+(1<<ADPS1)+(1<<ADPS2);  // Set the ADC's clock to system clock / 128
     ADCSRA |= (1<<ADEN);                         // Enable the ADC
     ADCSRA |= (0<<ADATE);
     ADCSRA |= (0<<ADIE);
     ADCSRA |= (0<<ADSC);
+#endif
     
     stop = false;
 }
@@ -1018,13 +1042,22 @@ void EmonLibCM_interrupt()
 #ifdef SAMPPIN
     digitalWrite(SAMPPIN,HIGH);
 #endif
-  
+
+#ifdef AVRDB         
+  rawSample = ADC0.RES;
+#else
   rawSample = ADC;
+#endif
   next = sample_index + 2;
   if (next>no_of_channels)                 // no_of_channels = count of Current channels in use. Voltage channel (0) is always read, so total is no_of_channels + 1
       next -= no_of_channels+1;
-  
+
+#ifdef AVRDB
+  ADC0.MUXPOS = ADC_Sequence[next];
+#else  
   ADMUX = ADCRef + ADC_Sequence[next];     // set up the next-but-one conversion
+#endif
+
 #ifdef SAMPPIN
     digitalWrite(SAMPPIN,LOW);
 #endif
@@ -1424,10 +1457,18 @@ float EmonLibCM_getTemperature(char sensorNumber)
 *
 ***************************************************************************************************/
 
+#ifdef AVRDB
+ISR(ADC0_RESRDY_vect) 
+{
+    ADC0.INTFLAGS = ADC_RESRDY_bm;
+    EmonLibCM_interrupt();
+}
+#else
 ISR(ADC_vect) 
 {
     EmonLibCM_interrupt();
 }
+#endif
 
 /**************************************************************************************************
 *
