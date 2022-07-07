@@ -51,6 +51,7 @@
 // #define SAMPPIN 5           // EmonTx: Preferred pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define SAMPPIN 19          // EmonTx: Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define INTPINS             // Debugging print of interrupt allocations
+#define SAMPPIN PIN_PA7
 
 #define AVRDB                  // Need to be able to set this from main sketch ??
 
@@ -573,15 +574,31 @@ void EmonLibCM_Start(void)
     firstcycle = true;
     missing_VoltageSamples = 0;
 
-#ifdef AVRDB         
+#ifdef AVRDB
+    
+    // SAMPCTRL = 14
+    // DIV 16 = 25.1 us (2+14+13.5)÷(24÷16) = 19.7 us !?
+    // DIV 20 = 25.1 us (2+14+13.5)÷(24÷20) = 24.6 us
+    // DIV 24 = 29.5 us (2+14+13.5)÷(24÷24) = 29.5 us
+    // DIV 32 = 37.6 us (2+14+13.5)÷(24÷32) = 39.3 us
+    // DIV 64 = 78.6 us (2+14+13.5)÷(24÷64) = 78.6 us
+    
+    // SAMPCTRL = 10
+    // DIV 24 = 25.6 us (2+10+13.5)÷(24÷24) = 25.5 us
+
     // Set up the ADC to be free-running    
     //VREF.ADC0REF = VREF_REFSEL_VREFA_gc;
+
+    ADC0.SAMPCTRL = 14;
+    ADC0.CTRLD |= 0x0;
+    
     VREF.ADC0REF = VREF_REFSEL_1V024_gc;
-    ADC0.CTRLC = ADC_PRESC_DIV32_gc;
+    ADC0.CTRLC = ADC_PRESC_DIV24_gc;
+
     ADC0.CTRLA = ADC_ENABLE_bm;
     ADC0.CTRLA |= ADC_RESSEL_12BIT_gc;
     ADC0.CTRLA |= ADC_FREERUN_bm;
-    ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc;
+    ADC0.MUXPOS = ADC_MUXPOS_AIN0_gc;
     ADC0.INTCTRL |= ADC_RESRDY_bm;
 
     ADC0.COMMAND = ADC_STCONV_bm;
@@ -1040,7 +1057,7 @@ void EmonLibCM_interrupt()
   static unsigned int acSense = 0;
   
 #ifdef SAMPPIN
-    digitalWrite(SAMPPIN,HIGH);
+    PORTA.OUT |= PIN7_bm;
 #endif
 
 #ifdef AVRDB         
@@ -1059,7 +1076,7 @@ void EmonLibCM_interrupt()
 #endif
 
 #ifdef SAMPPIN
-    digitalWrite(SAMPPIN,LOW);
+    PORTA.OUT &=~PIN7_bm;
 #endif
   // Count ADC samples for timing when voltage is unavailable
   missing_VoltageSamples++;
@@ -1068,7 +1085,7 @@ void EmonLibCM_interrupt()
   if (sample_index==0)                                               // ADC_Sample 0 is always the voltage channel.
   {
 #ifdef SAMPPIN
-    digitalWrite(SAMPPIN,HIGH);
+    PORTA.OUT |= PIN7_bm;
 #endif
       // Removing the d.c. offset - new method:
       // Rather than use a filter, which takes time to settle and will always contain a residual ripple, and which can lock
@@ -1115,7 +1132,7 @@ void EmonLibCM_interrupt()
 
       polarityConfirmedOfLastSampleV = polarityConfirmed;            // for identification of half cycle boundaries
 #ifdef SAMPPIN
-        digitalWrite(SAMPPIN,LOW);
+        PORTA.OUT &=~PIN7_bm;
 #endif
       
   }
@@ -1131,7 +1148,7 @@ void EmonLibCM_interrupt()
       //   from each side of the current sample for interpolation in the phase shift algorithm.
     
 #ifdef SAMPPIN
-    digitalWrite(SAMPPIN,HIGH);
+    PORTA.OUT |= PIN7_bm;
 #endif
 
                                           
@@ -1160,7 +1177,7 @@ void EmonLibCM_interrupt()
       
       lastRawSample[sample_index-1] = rawSample;                                         // Delay everything by 1 sample
 #ifdef SAMPPIN      
-      digitalWrite(SAMPPIN,LOW);
+      PORTA.OUT &=~PIN7_bm;
 #endif
   }
   
