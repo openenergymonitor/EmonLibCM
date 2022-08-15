@@ -22,8 +22,19 @@
 // Version 2.03 25/10/2019  getLineFrequency( ), setADC_VRef( ) added.
 // Version 2.04  1/08/2020  getDatalog_period( ) added.
 // Version 2.1.0 9/7/2020  2nd pulse input added. Array of structs was individual variables. Set watthour and pulse count added.
+// Version 2.1.1 15/9/2022  Changed default PIN for 1-Wire as if used on a EMONPI, due to PIN5 being used for shutdown request on the Pi
 
 
+//If using with emonTx, ensure your define EMONTX below or the oneWire bus will be on the wrong pin.
+// Defaulting to pin 4 seems sensible as this will stop 1W working on a EMONTX but will cause causing spurious shutdowns on an EMONPI.
+
+#undef EMONTX
+
+#ifdef EMONTX
+#define W1_PIN 5      //1W pin on a EMONTX, Shutdown pin on EMONPI
+#else
+#define W1_PIN 4      //1W pin on a EMONPI
+#endif
 
 
 #ifndef EmonLibCM_h

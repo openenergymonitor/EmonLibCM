@@ -253,7 +253,7 @@ double x[max_no_of_channels], y[max_no_of_channels]; // coefficients for real po
 // Temperature measurement
 //
 // Hardware Configuration
-byte W1Pin = 5;                                     // 1-Wire pin for temperature = 5 for emonTx V3, 4 for emonTx V2 & emonTx Shield
+byte W1Pin = W1_PIN;                                     // 1-Wire pin for temperature = 5 for emonTx V3, 4 for emonTx V2 & emonTx Shield
 char DS18B20_PWR = -1;                              // Power pin for DS18B20 temperature sensors. Default -1 - power off
 
 // Global variables used only inside the library
@@ -1217,7 +1217,7 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         return;                                         // & quit.
     }
 
-    oneWire.begin(W1Pin);                               // In case W1Pin has changed.
+    //oneWire.begin(W1Pin);                               // In case W1Pin has changed.
 
     if (temperatureEnabled = _enable)
     {
