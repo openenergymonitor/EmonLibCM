@@ -58,7 +58,9 @@
 #include <util/crc16.h>
 #include <OneWire.h>
 
+
 #define DS18B20SIG 0x28
+#define DS2438SIG 0x26
 #define SKIP_ROM 0xCC 
 #define MATCH_ROM 0x55
 #define CONVERT_TEMPERATURE 0x44
