@@ -75,7 +75,7 @@ float datalog_period_in_seconds = 10.0;
 unsigned int min_startup_cycles = 10;
 
 // Maximum number of Current (I) channels used to create arrays
-static const int max_no_of_channels = 5;
+static const int max_no_of_channels = 6;
 
 // User set number of Current (I) channels used by 'for' loops
 int no_of_channels = 4;
@@ -93,14 +93,14 @@ double line_frequency;                                                 // Timed 
 int realPower_CT[max_no_of_channels];
 int apparentPower_CT[max_no_of_channels];
 double Irms_CT[max_no_of_channels];
-long wh_CT[max_no_of_channels] = {0, 0, 0, 0, 0};
+long wh_CT[max_no_of_channels] = {0, 0, 0, 0, 0, 0};
 double pf[max_no_of_channels];
 double Vrms;
 volatile boolean ChannelInUse[max_no_of_channels];
 static byte lChannel[max_no_of_channels+1];                            // logical current channel no. (0-based)
     
 // analogue ports
-static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5};        // <-- Sequence in which the analogue ports are scanned, first is Voltage, remainder are currents
+static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5,6};        // <-- Sequence in which the analogue ports are scanned, first is Voltage, remainder are currents
 // ADC data
 int ADCBits = 10;                                                      // 10 for the emonTx and most of the Arduino range, 12 for the Arduino Due.
 double Vref = 3.3;                                                     // ADC Reference Voltage = 3.3 for emonTX, 5.0 for most of the Arduino range.
@@ -197,10 +197,10 @@ void onPulse0(), onPulse1();                                           // Indivi
 // Some of these variables are used in multiple blocks so cannot be static.
 // For integer maths, many variables need to be 'long' or in extreme cases 'int64_t'
 
-double currentCal[max_no_of_channels] = {90.91, 90.91, 90.91, 16.67, 90.91};
-double  phaseCal_CT[max_no_of_channels] ={4.2, 4.2, 4.2, 1.0, 4.2}; 
+double currentCal[max_no_of_channels] = {75.075, 75.075, 75.075, 75.075, 75.075, 75.075};
+double  phaseCal_CT[max_no_of_channels] ={1.5, 1.5, 1.5, 1.5, 1.5, 1.5}; 
 
-double voltageCal = 268.97;
+double voltageCal = 800.0;
 
 unsigned int ADC_Counts = 1 << ADCBits;
 
