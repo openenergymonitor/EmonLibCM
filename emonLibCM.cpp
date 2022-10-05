@@ -51,7 +51,7 @@
 // #define SAMPPIN 5           // EmonTx: Preferred pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define SAMPPIN 19          // EmonTx: Alternative pin for testing. This MUST be commented out if the temperature sensor power is connected here. Only include for testing.
 // #define INTPINS             // Debugging print of interrupt allocations
-#define SAMPPIN PIN_PA7
+// #define SAMPPIN PIN_PA7
 
 #define AVRDB                  // Need to be able to set this from main sketch ??
 
@@ -97,7 +97,7 @@ long wh_CT[max_no_of_channels] = {0, 0, 0, 0, 0, 0};
 double pf[max_no_of_channels];
 double Vrms;
 volatile boolean ChannelInUse[max_no_of_channels];
-static byte lChannel[max_no_of_channels+1];                            // logical current channel no. (0-based)
+static byte lChannel[20];                                              // logical current channel no. (0-based)
     
 // analogue ports
 static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5,6};        // <-- Sequence in which the analogue ports are scanned, first is Voltage, remainder are currents
@@ -484,7 +484,7 @@ unsigned long EmonLibCM_getPulseCount(byte channel)
 int EmonLibCM_getLogicalChannel(byte ADC_Input)
 {
     // Look up logical channel associated with physical pin 
-    //  N.B. Returns 255 for an unused input
+    // N.B. Returns 255 for an unused input
     return lChannel[ADC_Input];
 }
 
