@@ -11,7 +11,7 @@ Application Interface section of the User Documentation gives full details.
 */
 
 #include <Arduino.h>
-#include "emonLibCMx.h"
+#include "emonLibCM.h"
 
 #define RF69_COMPAT 0                                      //  Set to 1 if using RFM69CW, or 0 if using RFM12B
 #include <JeeLib.h>                                        //  https://github.com/jcw/jeelib - Tested with JeeLib 10 April 2017
