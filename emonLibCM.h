@@ -16,6 +16,14 @@
 //  and pulse counting incorporated into the library,  by Robert Wall 
 //  Release for testing 4/1/2017
 //
+
+// Version 3.0.4 21/11/2022   Option to return channel mean value
+// Version 3.0.3 05/10/2022   Fix online configuration
+// Version 3.0.2 20/08/2022   6 channel support
+// Version 3.0.1 07/07/2022   SAMP PIN lower level IO 
+// Version 3.0.0 20/04/2022   AVR-DB branch
+
+
 // Version 2.0  21/11/2018
 // Version 2.01  3/12/2018  No change.
 // Version 2.02 13/07/2019  getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,

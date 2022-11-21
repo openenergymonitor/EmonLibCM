@@ -1,8 +1,8 @@
-# EmonLibCM
+# EmonLibCM (AVR-DB Branch)
 
-The EmonLibCM library is maintained by @Robert.Wall and mirrored here for users of github.
+This is an adaptation of Robert Wall's EmonLibCM library to work with the AVR-DB microcontrollers.
 
-See forum release: [EmonLibCM](https://community.openenergymonitor.org/t/emonlibcm-version-2-03/9241/1)
+See Robert Wall's original forum release: [EmonLibCM](https://community.openenergymonitor.org/t/emonlibcm-version-2-03/9241/1)
 
 The following release notes are copied from the forum thread. The installation section is modified to reflect git command line installation.
 
@@ -47,6 +47,14 @@ Reload Arduino to start using the library.
 ---
 
 ## Changelog
+
+Version 3.0 includes AVR-DB specific changes:
+
+- Version 3.0.4 21/11/2022   Option to return channel mean value
+- Version 3.0.3 05/10/2022   Fix online configuration
+- Version 3.0.2 20/08/2022   6 channel support
+- Version 3.0.1 07/07/2022   SAMP PIN lower level IO 
+- Version 3.0.0 20/04/2022   AVR-DB branch
 
 Version 2.0 corrected some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.
 
