@@ -104,6 +104,7 @@ int EmonLibCM_getRealPower(int channel);
 int EmonLibCM_getApparentPower(int channel);
 double EmonLibCM_getPF(int channel);
 double EmonLibCM_getIrms(int channel);
+double EmonLibCM_getMean(int channel);
 double EmonLibCM_getVrms(void);
 double EmonLibCM_getAssumedVrms(void);
 double EmonLibCM_getDatalog_period(void);

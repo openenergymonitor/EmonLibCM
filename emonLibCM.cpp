@@ -93,6 +93,7 @@ double line_frequency;                                                 // Timed 
 int realPower_CT[max_no_of_channels];
 int apparentPower_CT[max_no_of_channels];
 double Irms_CT[max_no_of_channels];
+double channelMean[max_no_of_channels];
 long wh_CT[max_no_of_channels] = {0, 0, 0, 0, 0, 0};
 double pf[max_no_of_channels];
 double Vrms;
@@ -443,6 +444,11 @@ double EmonLibCM_getIrms(int channel)
     return Irms_CT[channel];
 }
 
+double EmonLibCM_getMean(int channel)
+{
+    return channelMean[channel];
+}
+
 double EmonLibCM_getVrms(void)
 {
     return Vrms;
@@ -735,7 +741,6 @@ void EmonLibCM_get_readings()
         double VA;
         int wattHoursRecent;
         double sumRealPower;
-
         
         // Apply combined phase & timing correction
         sumRealPower = (copyOf_sumPA_CT[i] * x[i] + copyOf_sumPB_CT[i] * y[i]); 
@@ -749,6 +754,8 @@ void EmonLibCM_get_readings()
         //  Here (signal+offset)^2 = copyOf_sumIsquared_CT / no of samples
         //       offset = cumI_deltas / no of samples
         Irms_CT[i] = sqrt(((double)copyOf_sumIsquared_CT[i] / copyOf_sampleSetsDuringThisDatalogPeriod) - ((double)copyOf_cumI_deltas[i] * copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod));
+        
+        channelMean[i] = (copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod)+(ADC_Counts >> 1);
         
         Irms_CT[i] *= currentCal[i];    
     
