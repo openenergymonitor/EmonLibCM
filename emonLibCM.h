@@ -17,6 +17,7 @@
 //  Release for testing 4/1/2017
 //
 
+// Version 3.0.5 22/11/2022   Fix for ADCDuration needs to be double
 // Version 3.0.4 21/11/2022   Option to return channel mean value
 // Version 3.0.3 05/10/2022   Fix online configuration
 // Version 3.0.2 20/08/2022   6 channel support
@@ -85,7 +86,7 @@ typedef uint8_t DeviceAddress[8];
 void EmonLibCM_cycles_per_second(unsigned int _cycles_per_second);
 void EmonLibCM_min_startup_cycles(unsigned int _min_startup_cycles);
 void EmonLibCM_datalog_period(float _datalog_period_in_seconds);
-void EmonLibCM_setADC(int _ADCBits,  int ADCDuration);
+void EmonLibCM_setADC(int _ADCBits,  double ADCDuration);
 void EmonLibCM_ADCCal(double _RefVoltage);
 void EmonLibCM_SetADC_VChannel(byte ADC_Input, double _amplitudeCal);
 void EmonLibCM_SetADC_IChannel(byte ADC_Input, double _amplitudeCal, double _phaseCal);

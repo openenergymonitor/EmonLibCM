@@ -17,6 +17,7 @@
 //  Release for testing 4/1/2017
 //
 
+// Version 3.0.5 22/11/2022   Fix for ADCDuration needs to be double
 // Version 3.0.4 21/11/2022   Option to return channel mean value
 // Version 3.0.3 05/10/2022   Fix online configuration
 // Version 3.0.2 20/08/2022   6 channel support
@@ -112,7 +113,7 @@ static byte ADC_Sequence[max_no_of_channels+1] = {0,1,2,3,4,5,6};        // <-- 
 // ADC data
 int ADCBits = 10;                                                      // 10 for the emonTx and most of the Arduino range, 12 for the Arduino Due.
 double Vref = 3.3;                                                     // ADC Reference Voltage = 3.3 for emonTX, 5.0 for most of the Arduino range.
-int ADCDuration = 104;                                                 // Time in microseconds for one ADC conversion = 104 for 16 MHz clock 
+double ADCDuration = 104;                                                 // Time in microseconds for one ADC conversion = 104 for 16 MHz clock 
 byte ADCRef = VREF_NORMAL  << 6;                                       // ADC Reference: VREF_EXTERNAL, VREF_NORMAL = AVcc, VREF_INTERNAL = Internal 1.1 V
 
 // Pulse Counting
@@ -342,7 +343,7 @@ void EmonLibCM_datalog_period(float _datalog_period_in_seconds)
     calcTemperatureLead();
 }
 
-void EmonLibCM_setADC(int _ADCBits,  int _ADCDuration)
+void EmonLibCM_setADC(int _ADCBits,  double _ADCDuration)
 {
     ADCBits = _ADCBits;
     ADCDuration = _ADCDuration;
