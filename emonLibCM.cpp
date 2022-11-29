@@ -61,6 +61,8 @@
 // #define INTPINS             // Debugging print of interrupt allocations
 // #define SAMPPIN PIN_PA7
 
+// #define Serial Serial3
+
 #define AVRDB                  // Need to be able to set this from main sketch ??
 
 #include "emonLibCM.h"
@@ -75,8 +77,11 @@
 
 #endif
 
-
-
+// Used for timing testing
+// unsigned long tst_now = 0;
+// unsigned long tst_lst = 0;
+// unsigned long tst_n = 0;
+// bool tst_ready = false;
 
 unsigned int cycles_per_second = 50;                                   // mains frequency in Hz (i.e. 50 or 60)
 float datalog_period_in_seconds = 10.0;
@@ -591,14 +596,15 @@ void EmonLibCM_Start(void)
 #ifdef AVRDB
     
     // SAMPCTRL = 14
-    // DIV 16 = 25.1 us (2+14+13.5)÷(24÷16) = 19.7 us !?
-    // DIV 20 = 25.1 us (2+14+13.5)÷(24÷20) = 24.6 us
-    // DIV 24 = 29.5 us (2+14+13.5)÷(24÷24) = 29.5 us
-    // DIV 32 = 37.6 us (2+14+13.5)÷(24÷32) = 39.3 us
-    // DIV 64 = 78.6 us (2+14+13.5)÷(24÷64) = 78.6 us
+    // DIV 16 = (2+14+13.5)÷(24÷16) = 19.7 us !?
+    // DIV 20 = (2+14+13.5)÷(24÷20) = 24.6 us
+    // DIV 24 = (2+14+13.5)÷(24÷24) = 29.5 us
+    // DIV 32 = (2+14+13.5)÷(24÷32) = 39.3 us
+    // DIV 48 = (2+14+13.5)÷(24÷48) = 59.0 us
+    // DIV 64 = (2+14+13.5)÷(24÷64) = 78.6 us
     
     // SAMPCTRL = 10
-    // DIV 24 = 25.6 us (2+10+13.5)÷(24÷24) = 25.5 us
+    // DIV 24 = (2+10+13.5)÷(24÷24) = 25.5 us
 
     // Set up the ADC to be free-running    
     //VREF.ADC0REF = VREF_REFSEL_VREFA_gc;
@@ -607,7 +613,7 @@ void EmonLibCM_Start(void)
     ADC0.CTRLD |= 0x0;
     
     VREF.ADC0REF = VREF_REFSEL_1V024_gc;
-    ADC0.CTRLC = ADC_PRESC_DIV24_gc;
+    ADC0.CTRLC = ADC_PRESC_DIV32_gc;
 
     ADC0.CTRLA = ADC_ENABLE_bm;
     ADC0.CTRLA |= ADC_RESSEL_12BIT_gc;
@@ -683,6 +689,7 @@ void EmonLibCM_StopADC(void)
 
 void EmonLibCM_get_readings()
 {
+
     // Use the 'volatile' variables passed from the ISR.
 
     double frequencyDeviation;
@@ -806,6 +813,13 @@ void EmonLibCM_get_readings()
 
 bool EmonLibCM_Ready()
 {
+    /*
+    if (tst_ready) {
+      tst_ready = false;
+      Serial.println(tst_now-tst_lst);
+    }
+    */
+    
     if (startConvertTemperatures)
     {
         startConvertTemperatures = false;
@@ -1150,7 +1164,17 @@ void EmonLibCM_interrupt()
         PORTA.OUT &=~PIN7_bm;
 #endif
       
+      // tst_n++;
   }
+  
+  /*
+  if (tst_n>=5000) {
+    tst_n = 0;
+    tst_lst = tst_now;
+    tst_now = micros();
+    tst_ready = true;
+  }
+  */
   
   if (sample_index>=1 && sample_index <= no_of_channels) 
   {
