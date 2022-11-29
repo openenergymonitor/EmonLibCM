@@ -17,6 +17,7 @@
 //  Release for testing 4/1/2017
 //
 
+// Version 3.0.6 29/11/2022   Slow down sample rate to DIV32 (39.3 us) improved zero power level
 // Version 3.0.5 22/11/2022   Fix for ADCDuration needs to be double
 // Version 3.0.4 21/11/2022   Option to return channel mean value
 // Version 3.0.3 05/10/2022   Fix online configuration
