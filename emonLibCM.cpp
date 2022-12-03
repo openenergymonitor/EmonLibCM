@@ -237,7 +237,8 @@ int64_t  sumPB_CT[max_no_of_channels];              // 'partial' power for real 
 uint64_t sumIsquared_CT[max_no_of_channels];
 long     cumI_deltas_CT[max_no_of_channels];        // <--- for offset removal (I)
 uint64_t sum_Vsquared;                              // for Vrms datalogging   
-long     sampleSetsDuringThisDatalogPeriod;   
+long     sampleSetsDuringThisDatalogPeriod;
+uint64_t sum_channel[max_no_of_channels];
 
 // Copies of ISR data for use by the main code
 // These are filled by the ADC helper routine at the end of the datalogging period
@@ -249,7 +250,7 @@ volatile uint64_t copyOf_sum_Vsquared;
 volatile long     copyOf_sampleSetsDuringThisDatalogPeriod;
 volatile int64_t  copyOf_cumI_deltas[max_no_of_channels];
 volatile int64_t  copyOf_cumV_deltas;
-
+volatile uint64_t copyOf_sum_channel[max_no_of_channels];
 // For mechanisms to check the integrity of this code structure
 #ifdef INTEGRITY
 int sampleSetsDuringThisMainsCycle;    
@@ -771,7 +772,7 @@ void EmonLibCM_get_readings()
         //       offset = cumI_deltas / no of samples
         Irms_CT[i] = sqrt(((double)copyOf_sumIsquared_CT[i] / copyOf_sampleSetsDuringThisDatalogPeriod) - ((double)copyOf_cumI_deltas[i] * copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod));
         
-        channelMean[i] = (copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod)+(ADC_Counts >> 1);
+        channelMean[i] = copyOf_sum_channel[i] / copyOf_sampleSetsDuringThisDatalogPeriod;
         
         Irms_CT[i] *= currentCal[i];    
     
@@ -950,6 +951,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
                   sumPB_CT[i] = 0;
                   sumIsquared_CT[i] = 0;
                   cumI_deltas_CT[i] = 0;
+                  sum_channel[i] = 0;
                 }
                 sum_Vsquared = 0;
                 cumV_deltas = 0;
@@ -978,6 +980,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
                 sumIsquared_CT[i] = 0;
                 copyOf_cumI_deltas[i] = cumI_deltas_CT[i];
                 cumI_deltas_CT[i] = 0;
+                copyOf_sum_channel[i] = sum_channel[i];
+                sum_channel[i] = 0;
               }
               copyOf_cumV_deltas = cumV_deltas;
               copyOf_sum_Vsquared = sum_Vsquared;
@@ -1041,6 +1045,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             sumIsquared_CT[i] = 0;
             copyOf_cumI_deltas[i] = cumI_deltas_CT[i];
             cumI_deltas_CT[i] = 0;
+            copyOf_sum_channel[i] = sum_channel[i];
+            sum_channel[i] = 0;
         }
         copyOf_sum_Vsquared = sum_Vsquared;
         sum_Vsquared = 0;
@@ -1197,8 +1203,9 @@ void EmonLibCM_interrupt()
       {
         ChannelInUse[sample_index-1] = true;
        
+        sum_channel[sample_index-1] += lastRawSample[sample_index-1];
         // Offset removal for current is the same as for the voltage.
-      
+         
         lastRawSample[sample_index-1] -= (ADC_Counts >> 1);                              // remove nominal offset (a small offset will remain)
        
         sampleI_minusDC = lastRawSample[sample_index-1];
@@ -1210,6 +1217,7 @@ void EmonLibCM_interrupt()
         // for Irms calculation 
         sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
         cumI_deltas_CT[sample_index-1] += sampleI_minusDC;                               // for use with offset removal
+         
 
       }
       else
