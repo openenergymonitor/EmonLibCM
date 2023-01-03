@@ -122,6 +122,7 @@ double EmonLibCM_getLineFrequency(void);
 long EmonLibCM_getWattHour(int channel);
 unsigned long EmonLibCM_getPulseCount(void);
 unsigned long EmonLibCM_getPulseCount(byte channel);
+unsigned long EmonLibCM_getMissedISR(void);
 
 
 void EmonLibCM_setTemperatureDataPin(byte _dataPin);
