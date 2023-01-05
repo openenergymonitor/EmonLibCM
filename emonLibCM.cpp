@@ -78,6 +78,8 @@
 
 #endif
 
+#include "util/OneWire_direct_gpio.h"
+
 // Used for timing testing
 // unsigned long tst_now = 0;
 // unsigned long tst_lst = 0;
@@ -310,6 +312,11 @@ uint16_t sample_index_period = 0;
 uint16_t missed_isr_positions[200];
 bool missed_isr_positions_start = false;
 bool missed_isr_positions_complete = false;
+
+IO_REG_TYPE bitmask;
+volatile IO_REG_TYPE *baseReg;
+bool onewire_active = false;
+bool onewire_isr_complete = true;
 /**************************************************************************************************
 *
 *   APPLICATION INTERFACE - Getters & Setters
@@ -1180,7 +1187,7 @@ void EmonLibCM_interrupt()
   static unsigned int acSense = 0;
   
   bool skip_isr = false;
-  last_micros = isr_micros;
+  last_micros = isr_micros;/*
   isr_micros = micros();
   if ((isr_micros-last_micros)>70) {
     //if (missed_isr_positions_start && !missed_isr_positions_complete) {
@@ -1189,7 +1196,12 @@ void EmonLibCM_interrupt()
     missed_isr++;
     skip_isr = true;
   }
-  sample_index_period ++;
+  sample_index_period ++;*/
+  
+  if (onewire_active) {
+    skip_isr = true;
+    missed_isr++;
+  }
   
 #ifdef SAMPPIN
     PORTA.OUT |= PIN7_bm;
@@ -1359,6 +1371,11 @@ void EmonLibCM_interrupt()
   sample_index++; // advance the control flag
   if (sample_index>no_of_channels) 
       sample_index = 0;
+      
+      
+  if (!onewire_isr_complete) {
+  
+  }
 }
 
 /**************************************************************************************************
@@ -1367,7 +1384,45 @@ void EmonLibCM_interrupt()
 *
 *
 ***************************************************************************************************/
+void onewire_write_bit(uint8_t v)
+{
+	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
 
+	if (v & 1) {
+		noInterrupts();
+		DIRECT_WRITE_LOW(reg, mask);
+		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+		delayMicroseconds(10);
+		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
+		interrupts();
+		delayMicroseconds(55);
+	} else {
+		//noInterrupts();
+		onewire_active = true;
+		DIRECT_WRITE_LOW(reg, mask);
+		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+		delayMicroseconds(30);
+		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
+		onewire_active = false;
+		//interrupts();
+		delayMicroseconds(5);
+	}
+}
+
+void onewire_write(uint8_t v, uint8_t power = 0) {
+  uint8_t bitMask;
+
+  for (bitMask = 0x01; bitMask; bitMask <<= 1) {
+	  onewire_write_bit( (bitMask & v)?1:0);
+  }
+  if (!power) {
+	  noInterrupts();
+	  DIRECT_MODE_INPUT(baseReg, bitmask);
+	  DIRECT_WRITE_LOW(baseReg, bitmask);
+	  interrupts();
+  }
+}
 
 void EmonLibCM_setTemperatureDataPin(byte _dataPin)
 {
@@ -1443,6 +1498,8 @@ void EmonLibCM_TemperatureEnable(bool _enable)
     }
 
     oneWire.begin(W1Pin);                               // In case W1Pin has changed.
+    bitmask = PIN_TO_BITMASK(W1Pin);
+	  baseReg = PIN_TO_BASEREG(W1Pin);
 
     if (temperatureEnabled = _enable)
     {
@@ -1481,13 +1538,13 @@ void EmonLibCM_TemperatureEnable(bool _enable)
             while ((j < numSensors) && (oneWire.search(temperatureSensors[j]))) 
                 j++;
         oneWire.reset();                                // write resolution to scratchpad 
-        oneWire.write(SKIP_ROM);
-        oneWire.write(WRITE_SCRATCHPAD);
+        onewire_write(SKIP_ROM);
+        onewire_write(WRITE_SCRATCHPAD);
         for(int i=0; i<3; i++)
-            oneWire.write(scratchpad[i]);
+            onewire_write(scratchpad[i]);
         oneWire.reset();                                // copy to EEPROM 
-        oneWire.write(SKIP_ROM);
-        oneWire.write(COPY_SCRATCHPAD, true);
+        onewire_write(SKIP_ROM);
+        onewire_write(COPY_SCRATCHPAD, true);
         delay(20);                                      // required by DS18B20
     }
     else                                                // make sure power is turned off
@@ -1560,8 +1617,8 @@ void convertTemperatures(void)
             digitalWrite(DS18B20_PWR, HIGH); 
         }
         oneWire.reset();
-        oneWire.write(SKIP_ROM);
-        oneWire.write(CONVERT_TEMPERATURE, true); 
+        onewire_write(SKIP_ROM);
+        onewire_write(CONVERT_TEMPERATURE, true); 
     }        // start conversion - all sensors    
 }
 
@@ -1574,6 +1631,7 @@ void retrieveTemperatures(void)
         {
             byte buf[9];
             int result;
+            /*
             if ((datalog_period_in_seconds < 0.2)                      // not enough time to get a reading
                 || !oneWire.reset()
                 || !temperatureSensors[j][0])                          // invalid address
@@ -1582,14 +1640,26 @@ void retrieveTemperatures(void)
                 continue;
             }            
             else
-            {
-                oneWire.write(MATCH_ROM);
+            {*/
+                oneWire.reset();
+                
+                onewire_buffer[0] = MATCH_ROM;
                 for(int i=0; i<8; i++) 
-                    oneWire.write(temperatureSensors[j][i]);
-                oneWire.write(READ_SCRATCHPAD);
+                  onewire_buffer[i+1] = temperatureSensors[j][i];
+                onewire_buffer[9] = READ_SCRATCHPAD;
+                
+                // onewire_write(MATCH_ROM);
+                // for(int i=0; i<8; i++) 
+                //     onewire_write(temperatureSensors[j][i]);
+                // onewire_write(READ_SCRATCHPAD);
+                
+                onewire_isr_complete = false;
+                while (!onewire_isr_complete) {
+                
+                }
                 for(int i=0; i<9; i++) 
                     buf[i] = oneWire.read();
-            }
+            //}
 
             if(oneWire.crc8(buf,8)==buf[8])
             {
@@ -1640,6 +1710,7 @@ float EmonLibCM_getTemperature(char sensorNumber)
         return temp/100.0;                                      // 300 series error codes are already set
     return (temp/100.0);
 }
+
 
 
 /**************************************************************************************************
