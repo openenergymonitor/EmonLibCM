@@ -43,8 +43,13 @@
 //                            special print format for emonPi added.  'Setters' to initialise Wh counters & pulse count added. If no a.c. voltage, 
 //                            now uses assumed Vrms to calculate power, VA & energy, p.f. and frequency both report zero. Error in phase shift calculation 
 //                            meant wrong correction was applied when ct's were sampled out of sequence.
-//  
-
+// Version 2.1.1 26/7/2021  Typo in Include file name - was emonLibCM2P.h
+// Version 2.1.2 7/8/2021   'assumedACVoltage' was 'assumedVrms' (name conflict in some sketches).
+// Version 2.2.0 14/9/2021  Pulse counting could count double on switch bounce. Changed: PulseMinPeriod, default was 110 ms; 
+//                            'laststate', 'timing' & 'edge' added to track input state; 'edge' added to setters; in init(), interrupt was attached to RISING edge;
+//                            most of the code in the pulse ISR removed, replaced by countPulses( ) called from main loop. 
+// Version 2.2.1 5/12/2012  Repackaged 30/10/2021 release: Debugging statements accidentally left in pulse ISR removed.
+// Version 2.2.2 15/9/2022  If temperature sensor pin had not been set but relied on default, no power was applied for initial search.
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
 
@@ -109,16 +114,17 @@ byte ADCRef = VREF_NORMAL  << 6;                                       // ADC Re
 #define PULSEINPUTS 2                // No of available interrupts for pulse counting (2 is the maximum, add more "onPulse..." functions for more)
 
 struct pulse {
-
-  bool PulseEnabled = false;
-  bool PulseChange = false;                                            // track change of state of counting
-  void (*pulseISR)();
   byte PulsePin = 3;                                                   // default to DI3 for the emonTx V3
   byte PulseInterrupt = 1;                                             // default to int1 for the emonTx V3
-  unsigned long PulseMinPeriod = 110;                                  // default to 110 ms
+  unsigned long PulseMinPeriod = 20;                                   // default to 20 ms
+  byte edge = FALLING;                                                 // edge to increment count 
   unsigned long pulseCount = 0;                                        // Total number of pulses from switch-on 
-  volatile unsigned long pulseIncrement = 0;                           // Incremental number of pulses between readings
-  unsigned long pulseTime;                                             // Instant of the last pulse - used for debounce logic
+  unsigned long pulseIncrement = 0;                                    // Incremental number of pulses between readings
+  bool PulseEnabled = false;
+  bool PulseChange = false;                                            // track change of state of counting
+  bool laststate = HIGH;                                               // Last state of interrupt pin
+  volatile bool timing = false;                                        // 'debounce' period running
+  volatile unsigned long pulseTime;                                    // Instant of the last interrupt - used for debounce logic
 } pulses[PULSEINPUTS];
 
 void onPulse(byte channel);                                            // General pulse handler
@@ -205,9 +211,9 @@ bool stop = false;
 volatile bool firstcycle = true;
     
 unsigned int samplesDuringThisCycle;
-bool acPresent = false;                             // TRUE when ac voltage input is detected.
+bool acPresent = false;                             // true when ac voltage input is detected.
 unsigned int acDetectedThreshold = ADC_Counts >> 5; // ac voltage detection threshold, ~10% of nominal voltage (given large amount of ripple)
-double assumedVrms = 240.0;
+double assumedACVoltage = 240.0;
 
 unsigned int datalogPeriodInMainsCycles;
 unsigned long ADCsamples_per_datalog_period;
@@ -376,14 +382,17 @@ void EmonLibCM_setPulsePin(byte channel, int _pin)
     pulses[channel].PulsePin = _pin;
     pulses[channel].PulseInterrupt = digitalPinToInterrupt(_pin);
 }
-void EmonLibCM_setPulseMinPeriod(int _period)
+
+void EmonLibCM_setPulseMinPeriod(int _period, byte _edge)
 {
     pulses[0].PulseMinPeriod = _period;
+    pulses[0].edge = _edge;
 }
 
-void EmonLibCM_setPulseMinPeriod(byte channel, int _period)
+void EmonLibCM_setPulseMinPeriod(byte channel, int _period, byte _edge)
 {
     pulses[channel].PulseMinPeriod = _period;
+    pulses[channel].edge = _edge;
 }
 
 void EmonLibCM_setPulseCount(long _pulseCount)
@@ -398,7 +407,7 @@ void EmonLibCM_setPulseCount(byte channel, long _pulseCount)
 
 void EmonLibCM_setAssumedVrms(double _assumedVrms)
 {
-    assumedVrms = _assumedVrms;
+    assumedACVoltage = _assumedVrms;
 }
 
 void EmonLibCM_setWattHour(byte channel, long _wh)
@@ -444,7 +453,7 @@ double EmonLibCM_getVrms(void)
 
 double EmonLibCM_getAssumedVrms(void)
 {
-    return assumedVrms;
+    return assumedACVoltage;
 }
 
 double EmonLibCM_getDatalog_period(void)
@@ -534,9 +543,9 @@ void EmonLibCM_Init(void)
         {
             pinMode(pulses[channel].PulsePin, INPUT_PULLUP);               // Set interrupt pulse counting pin as input & attach interrupt
             if (channel == 0)
-              attachInterrupt(pulses[channel].PulseInterrupt, onPulse0, RISING);
+              attachInterrupt(pulses[0].PulseInterrupt, onPulse0, CHANGE);
             if (channel == 1)
-              attachInterrupt(pulses[channel].PulseInterrupt, onPulse1, RISING);
+              attachInterrupt(pulses[1].PulseInterrupt, onPulse1, CHANGE);
         }
 #ifdef INTPINS        
   Serial.print("Ch: ");Serial.println(channel);
@@ -562,9 +571,6 @@ void EmonLibCM_Init(void)
 void EmonLibCM_Start(void)
 {
   
-    pulses[0].pulseISR = onPulse0;
-    pulses[1].pulseISR = onPulse1;
-    
     firstcycle = true;
     missing_VoltageSamples = 0;
     
@@ -653,9 +659,9 @@ void EmonLibCM_get_readings()
           {
               pinMode(pulses[channel].PulsePin, INPUT_PULLUP);         // Set interrupt pulse counting pin as input & attach interrupt
               if (channel == 0)
-                attachInterrupt(pulses[channel].PulseInterrupt, onPulse0, RISING);
+                attachInterrupt(pulses[channel].PulseInterrupt, onPulse0, CHANGE);
               if (channel == 1)
-                attachInterrupt(pulses[channel].PulseInterrupt, onPulse1, RISING);              
+                attachInterrupt(pulses[channel].PulseInterrupt, onPulse1, CHANGE);              
           }
           else 
           {
@@ -726,7 +732,7 @@ void EmonLibCM_get_readings()
         }
         else
         {
-          VA = Irms_CT[i] * assumedVrms;
+          VA = Irms_CT[i] * assumedACVoltage;
           
           pf[i] = 0.0;
 
@@ -750,6 +756,9 @@ void EmonLibCM_get_readings()
 
 bool EmonLibCM_Ready()
 {
+
+    countPulses();
+
     if (startConvertTemperatures)
     {
         startConvertTemperatures = false;
@@ -1156,7 +1165,10 @@ void EmonLibCM_setTemperaturePowerPin(char _powerPin)
     if (DS18B20_PWR >= 0)
     {
         pinMode(DS18B20_PWR, OUTPUT);  
-        digitalWrite(DS18B20_PWR, HIGH); 
+    }
+    else
+    {
+        pinMode(DS18B20_PWR, INPUT);  
     }
 }
 
@@ -1217,10 +1229,16 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         return;                                         // & quit.
     }
 
-    oneWire.begin(W1Pin);                               // In case W1Pin has changed.
 
     if (temperatureEnabled = _enable)
     {
+       if (DS18B20_PWR >= 0)
+        {
+            pinMode(DS18B20_PWR, OUTPUT);  
+            digitalWrite(DS18B20_PWR, HIGH); 
+            delay(10);
+        }
+        oneWire.begin(W1Pin);                           // In case W1Pin has changed.
         if (datalog_period_in_seconds < 1.0)            // Not enough time to convert between samples.
             temperatureResolution = TEMPRES_9;
         byte scratchpad[3];
@@ -1333,6 +1351,7 @@ void convertTemperatures(void)
         {
             pinMode(DS18B20_PWR, OUTPUT);  
             digitalWrite(DS18B20_PWR, HIGH); 
+            delay(2);
         }
         oneWire.reset();
         oneWire.write(SKIP_ROM);
@@ -1435,7 +1454,7 @@ ISR(ADC_vect)
 *
 *
 ***************************************************************************************************/
-// The pulse interrupt routines - run each time a rising edge of a pulse is detected
+// The pulse interrupt routines - run each time an edge of a pulse is detected
   
 void onPulse0(void) 
 {
@@ -1449,12 +1468,53 @@ void onPulse1(void)
 
 void onPulse(byte channel)  
 {         
-    if (pulses[channel].PulseMinPeriod)
+    if (!pulses[channel].timing)
     {
-        if ((millis() - pulses[channel].pulseTime) > pulses[channel].PulseMinPeriod)                   // Check that contact bounce has finished
-            pulses[channel].pulseIncrement++;
-        pulses[channel].pulseTime=millis(); 
+      pulses[channel].timing = true;
+      pulses[channel].pulseTime = millis(); 
     }
-    else                                                               // No 'debounce' required - electronic switch presumed    
-        pulses[channel].pulseIncrement++;                   
+}
+
+/**************************************************************************************************
+*
+*   'PULSE INPUT' handler (not part of ISR)
+*
+*
+***************************************************************************************************/
+// Handle pulse de-bounce and count on defined edge
+
+void countPulses(void)
+{
+
+  for (byte channel=0; channel<PULSEINPUTS; channel++)                                          // Handle pulse de-bounce
+  {
+    if (pulses[channel].PulseEnabled && pulses[channel].timing)
+    {
+      if (pulses[channel].PulseMinPeriod)
+      {
+        if ((millis() - pulses[channel].pulseTime) > pulses[channel].PulseMinPeriod)            // Check that contact bounce has finished
+        {
+          bool newstate = digitalRead(pulses[channel].PulsePin);
+          if ((pulses[channel].laststate && !newstate && pulses[channel].edge == FALLING)       // falling edge
+             || (!pulses[channel].laststate && newstate && pulses[channel].edge == RISING))     // rising edge
+          {
+            pulses[channel].pulseIncrement++; 
+          }
+          pulses[channel].timing = false;
+          pulses[channel].laststate = newstate;
+        }
+      }
+      else                                                                                      // No 'debounce' required - electronic switch presumed    
+      {
+          bool newstate = digitalRead(pulses[channel].PulsePin);
+          if ((pulses[channel].laststate && !newstate && pulses[channel].edge == FALLING)       // falling edge
+             || (!pulses[channel].laststate && newstate && pulses[channel].edge == RISING))     // rising edge
+          {
+            pulses[channel].pulseIncrement++; 
+          }
+          pulses[channel].timing = false;
+          pulses[channel].laststate = newstate;
+      }
+    }
+  }
 }

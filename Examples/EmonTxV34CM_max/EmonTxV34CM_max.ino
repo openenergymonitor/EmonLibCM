@@ -11,9 +11,9 @@ Application Interface section of the User Documentation gives full details.
 */
 
 #include <Arduino.h>
-#include "emonLibCMx.h"
+#include "emonLibCM.h"
 
-#define RF69_COMPAT 0                                      //  Set to 1 if using RFM69CW, or 0 if using RFM12B
+#define RF69_COMPAT 1                                      //  Set to 1 if using RFM69CW, or 0 if using RFM12B
 #include <JeeLib.h>                                        //  https://github.com/jcw/jeelib - Tested with JeeLib 10 April 2017
 // ISR(WDT_vect) { Sleepy::watchdogEvent(); } 
 
@@ -39,7 +39,7 @@ See: https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
 
 */       
 
-typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6; } PayloadTX;        // package the data for RF comms
+typedef struct {int power1, power2, power3, power4, Vrms, T1, T2, T3, T4, T5, T6, P; } PayloadTX;        // package the data for RF comms
 
 PayloadTX emontx;                                          // create an instance
 
@@ -65,7 +65,9 @@ void setup()
   Serial.begin(115200);
   
   Serial.println("\nEmonTx v3.4 EmonLibCM Continuous Monitoring Maximal Demo"); 
-
+  Serial.print("\nAssumed voltage for apparent power calculations when no a.c. is detected: ");  Serial.println(EmonLibCM_getAssumedVrms()); 
+  Serial.print("\nValues will be reported every ");  Serial.print(EmonLibCM_getDatalog_period()); Serial.println(" seconds");
+  
   EmonLibCM_SetADC_VChannel(0, 268.97);                    // ADC Input channel, voltage calibration - for Ideal UK Adapter = 268.97 
   EmonLibCM_SetADC_IChannel(1, 90.91, 4.2);                // ADC Input channel, current calibration, phase calibration
   EmonLibCM_SetADC_IChannel(2, 90.91, 4.2);                //  The current channels will be read in this order
@@ -75,15 +77,21 @@ void setup()
   EmonLibCM_setADC(10, 104);                               // ADC Bits (10 for emonTx & Arduino except Due=12 bits, ADC Duration 104 us for 16 MHz operation)
   EmonLibCM_ADCCal(3.3);                                   // ADC Reference voltage, (3.3 V for emonTx,  5.0 V for Arduino)
   
+  EmonLibCM_setAssumedVrms(240.0);                         // Assumed voltage when no a.c. detected 
   EmonLibCM_cycles_per_second(50);                         // mains frequency 50Hz, 60Hz
   EmonLibCM_datalog_period(10);                            // period of readings in seconds - normal value for emoncms.org
   
   EmonLibCM_min_startup_cycles(10);                        // number of cycles to let ADC run before starting first actual measurement
 
-  EmonLibCM_setPulseEnable(true);                          // Enable pulse counting
+  EmonLibCM_setPulseEnable(true);                          // Enable pulse counting. See the documentation for 2-channel versions of these functions.
   EmonLibCM_setPulsePin(3, 1);
-  EmonLibCM_setPulseMinPeriod(0);
+  EmonLibCM_setPulseMinPeriod(20, (byte)FALLING);          // 20 ms debounce period, count on falling edge (e.g. switch closing)
+  EmonLibCM_setPulseCount(0);                              // Initialise to pulse count to zero
 
+  EmonLibCM_setWattHour(0, 0);                             // Wh counters set to zero
+  EmonLibCM_setWattHour(1, 0);
+  EmonLibCM_setWattHour(2, 0);
+  EmonLibCM_setWattHour(3, 0);
 
   EmonLibCM_setTemperatureDataPin(5);                      // OneWire data pin (emonTx V3.4)
   EmonLibCM_setTemperaturePowerPin(19);                    // Temperature sensor Power Pin - 19 for emonTx V3.4  (-1 = Not used. No sensors, or sensor are permanently powered.)
@@ -134,6 +142,8 @@ void loop()
     emontx.T4 = allTemps[3];
     emontx.T5 = allTemps[4];
     emontx.T6 = allTemps[5];
+    
+    emontx.P  = EmonLibCM_getPulseCount();
    
     rf12_sendNow(0, &emontx, sizeof emontx);     //send data
 

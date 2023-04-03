@@ -21,8 +21,12 @@
 // Version 2.02 13/07/2019  getLogicalChannel( ), ReCalibrate_VChannel( ), ReCalibrate_IChannel( ) added, setPulsePin( ) interrupt no. was obligatory,
 // Version 2.03 25/10/2019  getLineFrequency( ), setADC_VRef( ) added.
 // Version 2.04  1/08/2020  getDatalog_period( ) added.
-// Version 2.1.0 9/7/2020  2nd pulse input added. Array of structs was individual variables. Set watthour and pulse count added.
-
+// Version 2.1.0 9/7/2021   2nd pulse input added. Array of structs was individual variables. Set watthour and pulse count added.
+// Version 2.1.1 26/7/2021  Version 2.1.0 was dated 9/7/20, "Shield" define was EmonLibCM2P_h
+// Version 2.1.2 7/8/2021   'assumedACVoltage' was 'assumedVrms' (name conflict in some sketches).
+// Version 2.2.0 14/9/2021  Optional parameter 'edge' added to setPulseMinPeriod().
+// Version 2.2.1 5/12/2021  Repackaged - no change.
+// Version 2.2.2 15/9/2022  No change.
 
 
 
@@ -94,8 +98,8 @@ void EmonLibCM_setPulseEnable(bool _enable);
 void EmonLibCM_setPulsePin(int _pin);
 void EmonLibCM_setPulsePin(byte channel, int _pin, int _interrupt);
 void EmonLibCM_setPulsePin(byte channel, int _pin);
-void EmonLibCM_setPulseMinPeriod(int _periodwidth);
-void EmonLibCM_setPulseMinPeriod(byte channel, int _periodwidth);
+void EmonLibCM_setPulseMinPeriod(int _period, byte _edge=FALLING);
+void EmonLibCM_setPulseMinPeriod(byte channel, int _period, byte _edge=FALLING);
 
 bool EmonLibCM_acPresent(void);
 
@@ -146,5 +150,8 @@ extern volatile boolean datalogEventPending;
 void calcPhaseShift(byte lChannel);
 void calcTemperatureLead(void);
 
+// Pulse debounce
+
+void countPulses(void);
 
 #endif
