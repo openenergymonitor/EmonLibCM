@@ -304,19 +304,21 @@ unsigned long temperatureConversionDelaySamples;
 volatile bool startConvertTemperatures = false;
 volatile bool convertingTemperaturesNoAC = false;            // Only used when not using mains for timing.
 
-unsigned long last_micros = 0;
-unsigned long isr_micros = 0;
-unsigned long missed_isr = 0;
-unsigned long copyOf_missed_isr = 0;
-uint16_t sample_index_period = 0;
-uint16_t missed_isr_positions[200];
-bool missed_isr_positions_start = false;
-bool missed_isr_positions_complete = false;
+// unsigned long last_micros = 0;
+// unsigned long isr_micros = 0;
+// unsigned long missed_isr = 0;
+// unsigned long copyOf_missed_isr = 0;
+
+// uint16_t sample_index_period = 0;
+// uint16_t missed_isr_positions[500];
+// uint8_t missed_isr_positions_mux[500];
+// uint16_t missed_isr_positions_adc[500];
+// bool missed_isr_positions_start = false;
+// bool missed_isr_positions_complete = false;
 
 IO_REG_TYPE bitmask;
 volatile IO_REG_TYPE *baseReg;
 bool onewire_active = false;
-bool onewire_isr_complete = true;
 /**************************************************************************************************
 *
 *   APPLICATION INTERFACE - Getters & Setters
@@ -531,22 +533,31 @@ unsigned long EmonLibCM_getPulseCount(byte channel)
 
 unsigned long EmonLibCM_getMissedISR(void)
 {
+    /*
     if (missed_isr_positions_complete) {
-      /*
+      
       Serial.println();
-      for (int i=0; i<200; i++) {
+      for (int i=0; i<500; i++) {
         Serial.print(i);
         Serial.print(' ');
-        Serial.println(missed_isr_positions[i]);
+        Serial.print(missed_isr_positions[i]);
+        Serial.print(' ');
+        Serial.print(missed_isr_positions_mux[i]);
+        Serial.print(' ');
+        Serial.println(missed_isr_positions_adc[i]);
         missed_isr_positions[i] = 0;
+        missed_isr_positions_mux[i] = 0;
+        missed_isr_positions_adc[i] = 0;
       }
       Serial.println();
-      delay(1000);*/
+      delay(1000);
       
       missed_isr_positions_start = false;
       missed_isr_positions_complete = false;
     }
     return copyOf_missed_isr;
+    */
+    return 0;
 }
 
 int EmonLibCM_getLogicalChannel(byte ADC_Input)
@@ -571,6 +582,8 @@ int EmonLibCM_minSampleSetsDuringThisMainsCycle(void)
 
 void EmonLibCM_Init(void)
 {   
+    // PORTE.DIR = PIN2_bm;
+    
     // Set number of channels to the number defined, else use the defaults
     if (no_of_Iinputs)
     { 
@@ -1072,16 +1085,17 @@ void EmonLibCM_allGeneralProcessing_withinISR()
                 reset_registers_B();
               }
               
+              /*
               if (missed_isr_positions_start) {
                 missed_isr_positions_complete = true;
               }              
               missed_isr_positions_start = true;
               
-
               copyOf_missed_isr = missed_isr;
               missed_isr = 0;
               
               sample_index_period = 0;
+              */
               
     #ifdef INTEGRITY
               copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
@@ -1137,16 +1151,17 @@ void EmonLibCM_allGeneralProcessing_withinISR()
           reset_registers_B();
         }
         
+        /*
         if (missed_isr_positions_start) {
           missed_isr_positions_complete = true;
         }              
         missed_isr_positions_start = true;
         
-
         copyOf_missed_isr = missed_isr;
         missed_isr = 0;
         
         sample_index_period = 0;
+        */
         
 #ifdef INTEGRITY
         copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
@@ -1186,22 +1201,7 @@ void EmonLibCM_interrupt()
   
   static unsigned int acSense = 0;
   
-  bool skip_isr = false;
-  last_micros = isr_micros;/*
-  isr_micros = micros();
-  if ((isr_micros-last_micros)>70) {
-    //if (missed_isr_positions_start && !missed_isr_positions_complete) {
-    //  missed_isr_positions[missed_isr] = sample_index_period;
-    //}
-    missed_isr++;
-    skip_isr = true;
-  }
-  sample_index_period ++;*/
-  
-  if (onewire_active) {
-    skip_isr = true;
-    missed_isr++;
-  }
+
   
 #ifdef SAMPPIN
     PORTA.OUT |= PIN7_bm;
@@ -1212,6 +1212,22 @@ void EmonLibCM_interrupt()
 #else
   rawSample = ADC;
 #endif
+
+  bool skip_isr = false;  
+  if (onewire_active) {
+    skip_isr = true;
+    
+    //if (missed_isr_positions_start && !missed_isr_positions_complete) {
+    //  missed_isr_positions[missed_isr] = sample_index_period;
+    //  missed_isr_positions_mux[missed_isr] = sample_index;
+    //  missed_isr_positions_adc[missed_isr] = rawSample;
+    //}
+    
+    //missed_isr++;
+  }
+  //sample_index_period ++;
+
+
   next = sample_index + 2;
   if (next>no_of_channels)                 // no_of_channels = count of Current channels in use. Voltage channel (0) is always read, so total is no_of_channels + 1
       next -= no_of_channels+1;
@@ -1371,11 +1387,6 @@ void EmonLibCM_interrupt()
   sample_index++; // advance the control flag
   if (sample_index>no_of_channels) 
       sample_index = 0;
-      
-      
-  if (!onewire_isr_complete) {
-  
-  }
 }
 
 /**************************************************************************************************
@@ -1384,25 +1395,60 @@ void EmonLibCM_interrupt()
 *
 *
 ***************************************************************************************************/
+uint8_t onewire_reset(void)
+{
+	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
+	uint8_t r;
+	uint8_t retries = 125;
+
+	// noInterrupts();
+	DIRECT_MODE_INPUT(reg, mask);
+	// interrupts();
+	// wait until the wire is high... just in case
+	do {
+		if (--retries == 0) return 0;
+		delayMicroseconds(2);
+	} while ( !DIRECT_READ(reg, mask));
+
+	//noInterrupts();
+	DIRECT_WRITE_LOW(reg, mask);
+	DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+	//interrupts();
+	delayMicroseconds(480);
+	
+	//noInterrupts();
+	onewire_active = true;
+	DIRECT_MODE_INPUT(reg, mask);	// allow it to float
+	delayMicroseconds(70);
+	r = !DIRECT_READ(reg, mask);
+	//interrupts();
+	onewire_active = false;
+	delayMicroseconds(410);
+	return r;
+}
+
 void onewire_write_bit(uint8_t v)
 {
 	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
 	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
 
 	if (v & 1) {
-		noInterrupts();
+		//noInterrupts();
+		onewire_active = true;
 		DIRECT_WRITE_LOW(reg, mask);
 		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
 		delayMicroseconds(10);
 		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
-		interrupts();
+		//interrupts();
+		onewire_active = false;
 		delayMicroseconds(55);
 	} else {
 		//noInterrupts();
 		onewire_active = true;
 		DIRECT_WRITE_LOW(reg, mask);
 		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
-		delayMicroseconds(30);
+		delayMicroseconds(60);
 		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
 		onewire_active = false;
 		//interrupts();
@@ -1417,11 +1463,41 @@ void onewire_write(uint8_t v, uint8_t power = 0) {
 	  onewire_write_bit( (bitMask & v)?1:0);
   }
   if (!power) {
-	  noInterrupts();
+	  //noInterrupts();
 	  DIRECT_MODE_INPUT(baseReg, bitmask);
 	  DIRECT_WRITE_LOW(baseReg, bitmask);
-	  interrupts();
+	  //interrupts();
   }
+}
+
+uint8_t onewire_read_bit(void)
+{
+	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
+	uint8_t r;
+
+	// noInterrupts();
+	onewire_active = true;
+	DIRECT_MODE_OUTPUT(reg, mask);
+	DIRECT_WRITE_LOW(reg, mask);
+	delayMicroseconds(3);
+	DIRECT_MODE_INPUT(reg, mask);	// let pin float, pull up will raise
+	delayMicroseconds(10);
+	r = DIRECT_READ(reg, mask);
+	// interrupts();
+	onewire_active = false;
+	delayMicroseconds(53);
+	return r;
+}
+
+uint8_t onewire_read() {
+    uint8_t bitMask;
+    uint8_t r = 0;
+
+    for (bitMask = 0x01; bitMask; bitMask <<= 1) {
+	if ( onewire_read_bit()) r |= bitMask;
+    }
+    return r;
 }
 
 void EmonLibCM_setTemperatureDataPin(byte _dataPin)
@@ -1537,12 +1613,12 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         if (temperatureSensors[0][0] != DS18B20SIG)     // not a signature of a DS18B20, so not a pre-existing array - search for sensors
             while ((j < numSensors) && (oneWire.search(temperatureSensors[j]))) 
                 j++;
-        oneWire.reset();                                // write resolution to scratchpad 
+        onewire_reset();                                // write resolution to scratchpad 
         onewire_write(SKIP_ROM);
         onewire_write(WRITE_SCRATCHPAD);
         for(int i=0; i<3; i++)
             onewire_write(scratchpad[i]);
-        oneWire.reset();                                // copy to EEPROM 
+        onewire_reset();                                // copy to EEPROM 
         onewire_write(SKIP_ROM);
         onewire_write(COPY_SCRATCHPAD, true);
         delay(20);                                      // required by DS18B20
@@ -1616,9 +1692,11 @@ void convertTemperatures(void)
             pinMode(DS18B20_PWR, OUTPUT);  
             digitalWrite(DS18B20_PWR, HIGH); 
         }
-        oneWire.reset();
+        
+        onewire_reset();
         onewire_write(SKIP_ROM);
-        onewire_write(CONVERT_TEMPERATURE, true); 
+        onewire_write(CONVERT_TEMPERATURE, true);
+         
     }        // start conversion - all sensors    
 }
 
@@ -1631,35 +1709,23 @@ void retrieveTemperatures(void)
         {
             byte buf[9];
             int result;
-            /*
             if ((datalog_period_in_seconds < 0.2)                      // not enough time to get a reading
-                || !oneWire.reset()
+                || !onewire_reset()
                 || !temperatureSensors[j][0])                          // invalid address
             {
                 temperatures[j] = BAD_TEMPERATURE;
                 continue;
             }            
             else
-            {*/
-                oneWire.reset();
-                
-                onewire_buffer[0] = MATCH_ROM;
+            {   
+                onewire_write(MATCH_ROM);
                 for(int i=0; i<8; i++) 
-                  onewire_buffer[i+1] = temperatureSensors[j][i];
-                onewire_buffer[9] = READ_SCRATCHPAD;
-                
-                // onewire_write(MATCH_ROM);
-                // for(int i=0; i<8; i++) 
-                //     onewire_write(temperatureSensors[j][i]);
-                // onewire_write(READ_SCRATCHPAD);
-                
-                onewire_isr_complete = false;
-                while (!onewire_isr_complete) {
-                
-                }
+                    onewire_write(temperatureSensors[j][i]);
+                onewire_write(READ_SCRATCHPAD);
                 for(int i=0; i<9; i++) 
                     buf[i] = oneWire.read();
-            //}
+            }
+            
 
             if(oneWire.crc8(buf,8)==buf[8])
             {
@@ -1724,7 +1790,9 @@ float EmonLibCM_getTemperature(char sensorNumber)
 ISR(ADC0_RESRDY_vect) 
 {
     ADC0.INTFLAGS = ADC_RESRDY_bm;
+    // PORTE.OUT |= PIN2_bm;
     EmonLibCM_interrupt();
+    // PORTE.OUT &=~PIN2_bm;
 }
 #else
 ISR(ADC_vect) 
