@@ -524,35 +524,6 @@ unsigned long EmonLibCM_getPulseCount(byte channel)
     return pulses[channel].pulseCount;
 }
 
-unsigned long EmonLibCM_getMissedISR(void)
-{
-    /*
-    if (missed_isr_positions_complete) {
-      
-      Serial.println();
-      for (int i=0; i<500; i++) {
-        Serial.print(i);
-        Serial.print(' ');
-        Serial.print(missed_isr_positions[i]);
-        Serial.print(' ');
-        Serial.print(missed_isr_positions_mux[i]);
-        Serial.print(' ');
-        Serial.println(missed_isr_positions_adc[i]);
-        missed_isr_positions[i] = 0;
-        missed_isr_positions_mux[i] = 0;
-        missed_isr_positions_adc[i] = 0;
-      }
-      Serial.println();
-      delay(1000);
-      
-      missed_isr_positions_start = false;
-      missed_isr_positions_complete = false;
-    }
-    return copyOf_missed_isr;
-    */
-    return 0;
-}
-
 int EmonLibCM_getLogicalChannel(byte ADC_Input)
 {
     // Look up logical channel associated with physical pin 
@@ -1009,27 +980,13 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             if (cycleCountForDatalogging >= datalogPeriodInMainsCycles && firstcycle==false) 
             {
               cycleCountForDatalogging = 0;
-              
-              // RESET DATA REGISTERS HERE??
-              
-              /*
-              if (missed_isr_positions_start) {
-                missed_isr_positions_complete = true;
-              }              
-              missed_isr_positions_start = true;
-              
-              copyOf_missed_isr = missed_isr;
-              missed_isr = 0;
-              
-              sample_index_period = 0;
-              */
+
+              accumSwap(&coll, &proc);
               
     #ifdef INTEGRITY
               copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
               lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif
-              
-              accumSwap(&coll, &proc);
               datalogEventPending = true;           
             }
           } // end of processing that is specific to the first Vsample in each +ve half cycle   
@@ -1070,27 +1027,14 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             lowestNoOfSampleSetsPerMainsCycle = 999;
         #endif          
                           
-        cycleCountForDatalogging = 0;  
-
-        // RESET DATA REGISTERS HERE??
+        cycleCountForDatalogging = 0;
         
-        /*
-        if (missed_isr_positions_start) {
-          missed_isr_positions_complete = true;
-        }              
-        missed_isr_positions_start = true;
-        
-        copyOf_missed_isr = missed_isr;
-        missed_isr = 0;
-        
-        sample_index_period = 0;
-        */
+        accumSwap(&coll, &proc);
         
 #ifdef INTEGRITY
         copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
         // lowestNoOfSampleSetsPerMainsCycle = 999;
 #endif       
-        accumSwap(&coll, &proc);
         datalogEventPending = true;
 
         // Stops the sampling at the end of the cycle if EmonLibCM_Stop() has been called
@@ -1125,8 +1069,6 @@ void EmonLibCM_interrupt()
   
   static unsigned int acSense = 0;
   
-
-  
 #ifdef SAMPPIN
     PORTA.OUT |= PIN7_bm;
 #endif
@@ -1140,17 +1082,7 @@ void EmonLibCM_interrupt()
   bool skip_isr = false;  
   if (onewire_active) {
     skip_isr = true;
-    
-    //if (missed_isr_positions_start && !missed_isr_positions_complete) {
-    //  missed_isr_positions[missed_isr] = sample_index_period;
-    //  missed_isr_positions_mux[missed_isr] = sample_index;
-    //  missed_isr_positions_adc[missed_isr] = rawSample;
-    //}
-    
-    //missed_isr++;
   }
-  //sample_index_period ++;
-
 
   next = sample_index + 2;
   if (next>no_of_channels)                 // no_of_channels = count of Current channels in use. Voltage channel (0) is always read, so total is no_of_channels + 1
@@ -1257,7 +1189,7 @@ void EmonLibCM_interrupt()
        
         coll->sum_channel[sample_index-1] += lastRawSample[sample_index-1];
         // Offset removal for current is the same as for the voltage.
-         
+       
         lastRawSample[sample_index-1] -= (ADC_Counts >> 1);                              // remove nominal offset (a small offset will remain)
        
         sampleI_minusDC = lastRawSample[sample_index-1];
