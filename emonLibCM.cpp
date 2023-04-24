@@ -233,37 +233,30 @@ unsigned int datalogPeriodInMainsCycles;
 unsigned long ADCsamples_per_datalog_period;
 
 // accumulators & counters for use by the ISR
-int64_t  A_cumV_deltas;                               // <--- for offset removal (V)
-int64_t  A_sumPA_CT[max_no_of_channels];              // 'partial' power for real power calculation
-int64_t  A_sumPB_CT[max_no_of_channels];              // 'partial' power for real power calculation
-uint64_t A_sumIsquared_CT[max_no_of_channels];
-int64_t  A_cumI_deltas_CT[max_no_of_channels];        // <--- for offset removal (I)
-uint64_t A_sum_Vsquared;                              // for Vrms datalogging   
-long     A_sampleSetsDuringThisDatalogPeriod;
-uint64_t A_sum_channel[max_no_of_channels];
+struct Accum
+{
+  int64_t  cumV_deltas;                               // <--- for offset removal (V)
+  int64_t  sumPA_CT[max_no_of_channels];              // 'partial' power for real power calculation
+  int64_t  sumPB_CT[max_no_of_channels];              // 'partial' power for real power calculation
+  uint64_t sumIsquared_CT[max_no_of_channels];
+  int64_t  cumI_deltas_CT[max_no_of_channels];        // <--- for offset removal (I)
+  uint64_t sum_Vsquared;                              // for Vrms datalogging   
+  long     sampleSetsDuringThisDatalogPeriod;
+  uint64_t sum_channel[max_no_of_channels];
+};
 
-// Copies of ISR data for use by the main code
-// These are filled by the ADC helper routine at the end of the datalogging period
+void accumSwap(volatile Accum **p_c, volatile Accum **p_p ) 
+{
+  volatile Accum *tmp;
+  tmp = *p_p;
+  *p_p = *p_c;
+  *p_c = tmp;
+}
 
-int64_t  B_cumV_deltas;
-int64_t  B_sumPA_CT[max_no_of_channels]; 
-int64_t  B_sumPB_CT[max_no_of_channels]; 
-uint64_t B_sumIsquared_CT[max_no_of_channels]; 
-int64_t  B_cumI_deltas_CT[max_no_of_channels];
-uint64_t B_sum_Vsquared;
-long     B_sampleSetsDuringThisDatalogPeriod;
-uint64_t B_sum_channel[max_no_of_channels];
-
-int64_t  cumV_deltas;
-int64_t  sumPA_CT[max_no_of_channels]; 
-int64_t  sumPB_CT[max_no_of_channels]; 
-uint64_t sumIsquared_CT[max_no_of_channels]; 
-int64_t  cumI_deltas_CT[max_no_of_channels];
-uint64_t sum_Vsquared;
-long     sampleSetsDuringThisDatalogPeriod;
-uint64_t sum_channel[max_no_of_channels];
-
-bool selected_data_registers = 0;
+volatile struct Accum accum_A;
+volatile struct Accum accum_B;
+volatile struct Accum *coll = &accum_A;
+volatile struct Accum *proc = &accum_B;
 
 // For mechanisms to check the integrity of this code structure
 #ifdef INTEGRITY
@@ -751,33 +744,6 @@ void EmonLibCM_StopADC(void)
 
 void EmonLibCM_get_readings()
 {
-    // Use the 'volatile' variables passed from the ISR.
-    if (selected_data_registers==0) {
-      for (int i=0; i<no_of_channels; i++) 
-      { 
-        sumPA_CT[i] = B_sumPA_CT[i];
-        sumPB_CT[i] = B_sumPB_CT[i];
-        sumIsquared_CT[i] = B_sumIsquared_CT[i];
-        cumI_deltas_CT[i] = B_cumI_deltas_CT[i];
-        sum_channel[i] = B_sum_channel[i];
-      }
-      sum_Vsquared = B_sum_Vsquared;
-      cumV_deltas = B_cumV_deltas;
-      sampleSetsDuringThisDatalogPeriod = B_sampleSetsDuringThisDatalogPeriod; 
-    } else {
-      for (int i=0; i<no_of_channels; i++) 
-      { 
-        sumPA_CT[i] = A_sumPA_CT[i];
-        sumPB_CT[i] = A_sumPB_CT[i];
-        sumIsquared_CT[i] = A_sumIsquared_CT[i];
-        cumI_deltas_CT[i] = A_cumI_deltas_CT[i];
-        sum_channel[i] = A_sum_channel[i];
-      }
-      sum_Vsquared = A_sum_Vsquared;
-      cumV_deltas = A_cumV_deltas;
-      sampleSetsDuringThisDatalogPeriod = A_sampleSetsDuringThisDatalogPeriod; 
-    }
-
     double frequencyDeviation;
     
     cli();
@@ -786,10 +752,10 @@ void EmonLibCM_get_readings()
     {
       if (!ChannelInUse[i])
       {
-          sumPA_CT[i] = 0;
-          sumPB_CT[i] = 0;
-          sumIsquared_CT[i] = 0;
-          cumI_deltas_CT[i] = 0;
+          proc->sumPA_CT[i] = 0;
+          proc->sumPB_CT[i] = 0;
+          proc->sumIsquared_CT[i] = 0;
+          proc->cumI_deltas_CT[i] = 0;
       }
     }           
 
@@ -828,11 +794,11 @@ void EmonLibCM_get_readings()
     // Vrms still contains the fine voltage offset. Correct this by subtracting the "Offset V^2" before the sq. root.
     // Real Power is calculated by interpolating between the 'partial power' values, applying "trigonometric" coefficients to
     //  preserve the amplitude of the interpolated value.
-    Vrms = sqrt(((double)sum_Vsquared / sampleSetsDuringThisDatalogPeriod)
-                - ((double)cumV_deltas * cumV_deltas / sampleSetsDuringThisDatalogPeriod / sampleSetsDuringThisDatalogPeriod)); 
+    Vrms = sqrt(((double)proc->sum_Vsquared / proc->sampleSetsDuringThisDatalogPeriod)
+                - ((double)proc->cumV_deltas * proc->cumV_deltas / proc->sampleSetsDuringThisDatalogPeriod / proc->sampleSetsDuringThisDatalogPeriod)); 
     Vrms *= voltageCal; 
     
-    frequencyDeviation = (double)ADCsamples_per_datalog_period / (sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
+    frequencyDeviation = (double)ADCsamples_per_datalog_period / (proc->sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
     line_frequency = cycles_per_second * frequencyDeviation;
 
     for (int i=0; i<no_of_channels; i++)    // Current channels
@@ -844,19 +810,19 @@ void EmonLibCM_get_readings()
         double sumRealPower;
         
         // Apply combined phase & timing correction
-        sumRealPower = (sumPA_CT[i] * x[i] + sumPB_CT[i] * y[i]); 
+        sumRealPower = (proc->sumPA_CT[i] * x[i] + proc->sumPB_CT[i] * y[i]); 
                 
         // sumRealPower still contains the fine offsets of both V & I. Correct this by subtracting the "Offset Power": cumV_deltas * cumI_deltas_CT
-        powerNow = (sumRealPower / sampleSetsDuringThisDatalogPeriod - (double)cumV_deltas * cumI_deltas_CT[i] 
-                   / sampleSetsDuringThisDatalogPeriod / sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
+        powerNow = (sumRealPower / proc->sampleSetsDuringThisDatalogPeriod - (double)proc->cumV_deltas * proc->cumI_deltas_CT[i] 
+                   / proc->sampleSetsDuringThisDatalogPeriod / proc->sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
       
         //  root of mean squares, removing fine offset
         //  The rms of a signal plus an offset is  sqrt( signal^2 + offset^2). 
         //  Here (signal+offset)^2 = sumIsquared_CT / no of samples
         //       offset = cumI_deltas_CT / no of samples
-        Irms_CT[i] = sqrt(((double)sumIsquared_CT[i] / sampleSetsDuringThisDatalogPeriod) - ((double)cumI_deltas_CT[i] * cumI_deltas_CT[i] / sampleSetsDuringThisDatalogPeriod / sampleSetsDuringThisDatalogPeriod));
+        Irms_CT[i] = sqrt(((double)proc->sumIsquared_CT[i] / proc->sampleSetsDuringThisDatalogPeriod) - ((double)proc->cumI_deltas_CT[i] * proc->cumI_deltas_CT[i] / proc->sampleSetsDuringThisDatalogPeriod / proc->sampleSetsDuringThisDatalogPeriod));
         
-        channelMean[i] = sum_channel[i] / sampleSetsDuringThisDatalogPeriod;
+        channelMean[i] = proc->sum_channel[i] / proc->sampleSetsDuringThisDatalogPeriod;
         
         Irms_CT[i] *= currentCal[i];    
     
@@ -888,6 +854,8 @@ void EmonLibCM_get_readings()
         wh_CT[i]+= wattHoursRecent;                                                             // accumulated WattHours since start-up
         residualEnergy_CT[i] = energyNow - (wattHoursRecent * 3600.0);                          // fp for accuracy
     }
+    
+    memset(proc, 0, sizeof(Accum));
    
     //  Retrieve the temperatures, which should be stored inside each sensor
     if (temperatureEnabled)
@@ -992,34 +960,6 @@ void calcTemperatureLead(void)
 *
 *
 ***************************************************************************************************/
-void reset_registers_A() {
-  for (int i=0; i<no_of_channels; i++) 
-  { 
-    A_sumPA_CT[i] = 0;
-    A_sumPB_CT[i] = 0;
-    A_sumIsquared_CT[i] = 0;
-    A_cumI_deltas_CT[i] = 0;
-    A_sum_channel[i] = 0;
-  }
-  A_sum_Vsquared = 0;
-  A_cumV_deltas = 0;
-  A_sampleSetsDuringThisDatalogPeriod = 0;
-}
-
-void reset_registers_B() {
-  for (int i=0; i<no_of_channels; i++) 
-  { 
-    B_sumPA_CT[i] = 0;
-    B_sumPB_CT[i] = 0;
-    B_sumIsquared_CT[i] = 0;
-    B_cumI_deltas_CT[i] = 0;
-    B_sum_channel[i] = 0;
-  }
-  B_sum_Vsquared = 0;
-  B_cumV_deltas = 0;
-  B_sampleSetsDuringThisDatalogPeriod = 0;
-}
-
 void EmonLibCM_allGeneralProcessing_withinISR()
 {
   /* This routine deals with activities that are only required at specific points
@@ -1055,14 +995,6 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             {
                 firstcycle = false;
                 cycleCountForDatalogging = 0;
-                selected_data_registers = !selected_data_registers;  
-                
-                if (selected_data_registers==0) {
-                  reset_registers_A();
-                } else {
-                  reset_registers_B();
-                }
-                
     #ifdef INTEGRITY
                 lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif      
@@ -1077,13 +1009,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             if (cycleCountForDatalogging >= datalogPeriodInMainsCycles && firstcycle==false) 
             {
               cycleCountForDatalogging = 0;
-              selected_data_registers = !selected_data_registers;
               
-              if (selected_data_registers==0) {
-                reset_registers_A();
-              } else {
-                reset_registers_B();
-              }
+              // RESET DATA REGISTERS HERE??
               
               /*
               if (missed_isr_positions_start) {
@@ -1102,6 +1029,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
               lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif
               
+              accumSwap(&coll, &proc);
               datalogEventPending = true;           
             }
           } // end of processing that is specific to the first Vsample in each +ve half cycle   
@@ -1143,13 +1071,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
         #endif          
                           
         cycleCountForDatalogging = 0;  
-        selected_data_registers = !selected_data_registers;
-        
-        if (selected_data_registers==0) {
-          reset_registers_A();
-        } else {
-          reset_registers_B();
-        }
+
+        // RESET DATA REGISTERS HERE??
         
         /*
         if (missed_isr_positions_start) {
@@ -1166,7 +1089,8 @@ void EmonLibCM_allGeneralProcessing_withinISR()
 #ifdef INTEGRITY
         copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
         // lowestNoOfSampleSetsPerMainsCycle = 999;
-#endif        
+#endif       
+        accumSwap(&coll, &proc);
         datalogEventPending = true;
 
         // Stops the sampling at the end of the cycle if EmonLibCM_Stop() has been called
@@ -1284,25 +1208,14 @@ void EmonLibCM_interrupt()
 #ifdef INTEGRITY
       sampleSetsDuringThisMainsCycle++; 
 #endif
-      if (selected_data_registers==0) {
-        A_sampleSetsDuringThisDatalogPeriod++;      
-        samplesDuringThisCycle++;
-        //
-        // for the Vrms calculation 
-        A_sum_Vsquared += ((long)sampleV_minusDC * sampleV_minusDC);     // cumulative V^2 (V_ADC x V_ADC)
-        //
-        // store items for later use
-        A_cumV_deltas += sampleV_minusDC;                                // for use with offset removal
-      } else {
-        B_sampleSetsDuringThisDatalogPeriod++;      
-        samplesDuringThisCycle++;
-        //
-        // for the Vrms calculation 
-        B_sum_Vsquared += ((long)sampleV_minusDC * sampleV_minusDC);     // cumulative V^2 (V_ADC x V_ADC)
-        //
-        // store items for later use
-        B_cumV_deltas += sampleV_minusDC;                                // for use with offset removal    
-      }
+      coll->sampleSetsDuringThisDatalogPeriod++;      
+      samplesDuringThisCycle++;
+      //
+      // for the Vrms calculation 
+      coll->sum_Vsquared += ((long)sampleV_minusDC * sampleV_minusDC);     // cumulative V^2 (V_ADC x V_ADC)
+      //
+      // store items for later use
+      coll->cumV_deltas += sampleV_minusDC;                                // for use with offset removal
       
 
       polarityConfirmedOfLastSampleV = polarityConfirmed;            // for identification of half cycle boundaries
@@ -1342,37 +1255,21 @@ void EmonLibCM_interrupt()
       {
         ChannelInUse[sample_index-1] = true;
        
-        if (selected_data_registers==0) {
-          A_sum_channel[sample_index-1] += lastRawSample[sample_index-1];
-          // Offset removal for current is the same as for the voltage.
-           
-          lastRawSample[sample_index-1] -= (ADC_Counts >> 1);                              // remove nominal offset (a small offset will remain)
+        coll->sum_channel[sample_index-1] += lastRawSample[sample_index-1];
+        // Offset removal for current is the same as for the voltage.
          
-          sampleI_minusDC = lastRawSample[sample_index-1];
-                
-          // calculate the "partial real powers" in this sample pair and add to the accumulated sums - fine d.c. offsets are still present
-          A_sumPA_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power A
-          A_sumPB_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power B
-            
-          // for Irms calculation 
-          A_sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
-          A_cumI_deltas_CT[sample_index-1] += sampleI_minusDC;                               // for use with offset removal
-        } else {
-          B_sum_channel[sample_index-1] += lastRawSample[sample_index-1];
-          // Offset removal for current is the same as for the voltage.
-           
-          lastRawSample[sample_index-1] -= (ADC_Counts >> 1);                              // remove nominal offset (a small offset will remain)
-         
-          sampleI_minusDC = lastRawSample[sample_index-1];
-                
-          // calculate the "partial real powers" in this sample pair and add to the accumulated sums - fine d.c. offsets are still present
-          B_sumPA_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power A
-          B_sumPB_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power B
-            
-          // for Irms calculation 
-          B_sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
-          B_cumI_deltas_CT[sample_index-1] += sampleI_minusDC;                               // for use with offset removal   
-        }
+        lastRawSample[sample_index-1] -= (ADC_Counts >> 1);                              // remove nominal offset (a small offset will remain)
+       
+        sampleI_minusDC = lastRawSample[sample_index-1];
+              
+        // calculate the "partial real powers" in this sample pair and add to the accumulated sums - fine d.c. offsets are still present
+        coll->sumPA_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power A
+        coll->sumPB_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power B
+          
+        // for Irms calculation 
+        coll->sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
+        coll->cumI_deltas_CT[sample_index-1] += sampleI_minusDC;                               // for use with offset removal
+
       }
       else
           ChannelInUse[sample_index-1] = false;
