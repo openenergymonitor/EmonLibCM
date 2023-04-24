@@ -297,18 +297,6 @@ unsigned long temperatureConversionDelaySamples;
 volatile bool startConvertTemperatures = false;
 volatile bool convertingTemperaturesNoAC = false;            // Only used when not using mains for timing.
 
-// unsigned long last_micros = 0;
-// unsigned long isr_micros = 0;
-// unsigned long missed_isr = 0;
-// unsigned long copyOf_missed_isr = 0;
-
-// uint16_t sample_index_period = 0;
-// uint16_t missed_isr_positions[500];
-// uint8_t missed_isr_positions_mux[500];
-// uint16_t missed_isr_positions_adc[500];
-// bool missed_isr_positions_start = false;
-// bool missed_isr_positions_complete = false;
-
 IO_REG_TYPE bitmask;
 volatile IO_REG_TYPE *baseReg;
 bool onewire_active = false;
@@ -546,8 +534,6 @@ int EmonLibCM_minSampleSetsDuringThisMainsCycle(void)
 
 void EmonLibCM_Init(void)
 {   
-    // PORTE.DIR = PIN2_bm;
-    
     // Set number of channels to the number defined, else use the defaults
     if (no_of_Iinputs)
     { 
@@ -931,6 +917,8 @@ void calcTemperatureLead(void)
 *
 *
 ***************************************************************************************************/
+
+
 void EmonLibCM_allGeneralProcessing_withinISR()
 {
   /* This routine deals with activities that are only required at specific points
@@ -960,12 +948,14 @@ void EmonLibCM_allGeneralProcessing_withinISR()
                 }
                 sampleSetsDuringThisMainsCycle = 0;   
             #endif            
-            
+           
             // Used in stop start operation, discards the first partial cycle
             if (firstcycle==true && cycleCountForDatalogging >= min_startup_cycles)
             {
                 firstcycle = false;
                 cycleCountForDatalogging = 0;
+                
+                memset(coll, 0, sizeof(Accum));
     #ifdef INTEGRITY
                 lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif      
@@ -1619,9 +1609,7 @@ float EmonLibCM_getTemperature(char sensorNumber)
 ISR(ADC0_RESRDY_vect) 
 {
     ADC0.INTFLAGS = ADC_RESRDY_bm;
-    // PORTE.OUT |= PIN2_bm;
     EmonLibCM_interrupt();
-    // PORTE.OUT &=~PIN2_bm;
 }
 #else
 ISR(ADC_vect) 
