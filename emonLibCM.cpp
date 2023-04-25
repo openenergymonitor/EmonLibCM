@@ -62,7 +62,7 @@
 // #define INTPINS             // Debugging print of interrupt allocations
 // #define SAMPPIN PIN_PA7
 
-// #define Serial Serial3
+#define Serial Serial3
 
 #define AVRDB                  // Need to be able to set this from main sketch ??
 
@@ -77,6 +77,8 @@
 #include "WProgram.h"
 
 #endif
+
+#include "util/OneWire_direct_gpio.h"
 
 // Used for timing testing
 // unsigned long tst_now = 0;
@@ -231,24 +233,30 @@ unsigned int datalogPeriodInMainsCycles;
 unsigned long ADCsamples_per_datalog_period;
 
 // accumulators & counters for use by the ISR
-long     cumV_deltas;                               // <--- for offset removal (V)
-int64_t  sumPA_CT[max_no_of_channels];              // 'partial' power for real power calculation
-int64_t  sumPB_CT[max_no_of_channels];              // 'partial' power for real power calculation
-uint64_t sumIsquared_CT[max_no_of_channels];
-long     cumI_deltas_CT[max_no_of_channels];        // <--- for offset removal (I)
-uint64_t sum_Vsquared;                              // for Vrms datalogging   
-long     sampleSetsDuringThisDatalogPeriod;   
+struct Accum
+{
+  int64_t  cumV_deltas;                               // <--- for offset removal (V)
+  int64_t  sumPA_CT[max_no_of_channels];              // 'partial' power for real power calculation
+  int64_t  sumPB_CT[max_no_of_channels];              // 'partial' power for real power calculation
+  uint64_t sumIsquared_CT[max_no_of_channels];
+  int64_t  cumI_deltas_CT[max_no_of_channels];        // <--- for offset removal (I)
+  uint64_t sum_Vsquared;                              // for Vrms datalogging   
+  long     sampleSetsDuringThisDatalogPeriod;
+  uint64_t sum_channel[max_no_of_channels];
+};
 
-// Copies of ISR data for use by the main code
-// These are filled by the ADC helper routine at the end of the datalogging period
+void accumSwap(volatile Accum **p_c, volatile Accum **p_p ) 
+{
+  volatile Accum *tmp;
+  tmp = *p_p;
+  *p_p = *p_c;
+  *p_c = tmp;
+}
 
-volatile int64_t  copyOf_sumPA_CT[max_no_of_channels]; 
-volatile int64_t  copyOf_sumPB_CT[max_no_of_channels]; 
-volatile uint64_t copyOf_sumIsquared_CT[max_no_of_channels]; 
-volatile uint64_t copyOf_sum_Vsquared;
-volatile long     copyOf_sampleSetsDuringThisDatalogPeriod;
-volatile int64_t  copyOf_cumI_deltas[max_no_of_channels];
-volatile int64_t  copyOf_cumV_deltas;
+volatile struct Accum accum_A;
+volatile struct Accum accum_B;
+volatile struct Accum *coll = &accum_A;
+volatile struct Accum *proc = &accum_B;
 
 // For mechanisms to check the integrity of this code structure
 #ifdef INTEGRITY
@@ -289,6 +297,9 @@ unsigned long temperatureConversionDelaySamples;
 volatile bool startConvertTemperatures = false;
 volatile bool convertingTemperaturesNoAC = false;            // Only used when not using mains for timing.
 
+IO_REG_TYPE bitmask;
+volatile IO_REG_TYPE *baseReg;
+bool onewire_active = false;
 /**************************************************************************************************
 *
 *   APPLICATION INTERFACE - Getters & Setters
@@ -690,9 +701,6 @@ void EmonLibCM_StopADC(void)
 
 void EmonLibCM_get_readings()
 {
-
-    // Use the 'volatile' variables passed from the ISR.
-
     double frequencyDeviation;
     
     cli();
@@ -701,10 +709,10 @@ void EmonLibCM_get_readings()
     {
       if (!ChannelInUse[i])
       {
-          copyOf_sumPA_CT[i] = 0;
-          copyOf_sumPB_CT[i] = 0;
-          copyOf_sumIsquared_CT[i] = 0;
-          copyOf_cumI_deltas[i] = 0;
+          proc->sumPA_CT[i] = 0;
+          proc->sumPB_CT[i] = 0;
+          proc->sumIsquared_CT[i] = 0;
+          proc->cumI_deltas_CT[i] = 0;
       }
     }           
 
@@ -743,11 +751,11 @@ void EmonLibCM_get_readings()
     // Vrms still contains the fine voltage offset. Correct this by subtracting the "Offset V^2" before the sq. root.
     // Real Power is calculated by interpolating between the 'partial power' values, applying "trigonometric" coefficients to
     //  preserve the amplitude of the interpolated value.
-    Vrms = sqrt(((double)copyOf_sum_Vsquared / copyOf_sampleSetsDuringThisDatalogPeriod)
-                - ((double)copyOf_cumV_deltas * copyOf_cumV_deltas / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod)); 
+    Vrms = sqrt(((double)proc->sum_Vsquared / proc->sampleSetsDuringThisDatalogPeriod)
+                - ((double)proc->cumV_deltas * proc->cumV_deltas / proc->sampleSetsDuringThisDatalogPeriod / proc->sampleSetsDuringThisDatalogPeriod)); 
     Vrms *= voltageCal; 
     
-    frequencyDeviation = (double)ADCsamples_per_datalog_period / (copyOf_sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
+    frequencyDeviation = (double)ADCsamples_per_datalog_period / (proc->sampleSetsDuringThisDatalogPeriod * (no_of_channels + 1)); // nominal value / actual value
     line_frequency = cycles_per_second * frequencyDeviation;
 
     for (int i=0; i<no_of_channels; i++)    // Current channels
@@ -759,19 +767,19 @@ void EmonLibCM_get_readings()
         double sumRealPower;
         
         // Apply combined phase & timing correction
-        sumRealPower = (copyOf_sumPA_CT[i] * x[i] + copyOf_sumPB_CT[i] * y[i]); 
+        sumRealPower = (proc->sumPA_CT[i] * x[i] + proc->sumPB_CT[i] * y[i]); 
                 
-        // sumRealPower still contains the fine offsets of both V & I. Correct this by subtracting the "Offset Power": cumV_deltas * cumI_deltas
-        powerNow = (sumRealPower / copyOf_sampleSetsDuringThisDatalogPeriod - (double)copyOf_cumV_deltas * copyOf_cumI_deltas[i] 
-                   / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
+        // sumRealPower still contains the fine offsets of both V & I. Correct this by subtracting the "Offset Power": cumV_deltas * cumI_deltas_CT
+        powerNow = (sumRealPower / proc->sampleSetsDuringThisDatalogPeriod - (double)proc->cumV_deltas * proc->cumI_deltas_CT[i] 
+                   / proc->sampleSetsDuringThisDatalogPeriod / proc->sampleSetsDuringThisDatalogPeriod) * voltageCal * currentCal[i];        
       
         //  root of mean squares, removing fine offset
         //  The rms of a signal plus an offset is  sqrt( signal^2 + offset^2). 
-        //  Here (signal+offset)^2 = copyOf_sumIsquared_CT / no of samples
-        //       offset = cumI_deltas / no of samples
-        Irms_CT[i] = sqrt(((double)copyOf_sumIsquared_CT[i] / copyOf_sampleSetsDuringThisDatalogPeriod) - ((double)copyOf_cumI_deltas[i] * copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod / copyOf_sampleSetsDuringThisDatalogPeriod));
+        //  Here (signal+offset)^2 = sumIsquared_CT / no of samples
+        //       offset = cumI_deltas_CT / no of samples
+        Irms_CT[i] = sqrt(((double)proc->sumIsquared_CT[i] / proc->sampleSetsDuringThisDatalogPeriod) - ((double)proc->cumI_deltas_CT[i] * proc->cumI_deltas_CT[i] / proc->sampleSetsDuringThisDatalogPeriod / proc->sampleSetsDuringThisDatalogPeriod));
         
-        channelMean[i] = (copyOf_cumI_deltas[i] / copyOf_sampleSetsDuringThisDatalogPeriod)+(ADC_Counts >> 1);
+        channelMean[i] = proc->sum_channel[i] / proc->sampleSetsDuringThisDatalogPeriod;
         
         Irms_CT[i] *= currentCal[i];    
     
@@ -803,6 +811,8 @@ void EmonLibCM_get_readings()
         wh_CT[i]+= wattHoursRecent;                                                             // accumulated WattHours since start-up
         residualEnergy_CT[i] = energyNow - (wattHoursRecent * 3600.0);                          // fp for accuracy
     }
+    
+    memset(proc, 0, sizeof(Accum));
    
     //  Retrieve the temperatures, which should be stored inside each sensor
     if (temperatureEnabled)
@@ -944,19 +954,11 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             {
                 firstcycle = false;
                 cycleCountForDatalogging = 0;
-                for (int i=0; i<no_of_channels; i++) 
-                { 
-                  sumPA_CT[i] = 0;
-                  sumPB_CT[i] = 0;
-                  sumIsquared_CT[i] = 0;
-                  cumI_deltas_CT[i] = 0;
-                }
-                sum_Vsquared = 0;
-                cumV_deltas = 0;
+                
+                memset(coll, 0, sizeof(Accum));
     #ifdef INTEGRITY
                 lowestNoOfSampleSetsPerMainsCycle = 999;
-    #endif          
-                sampleSetsDuringThisDatalogPeriod = 0;
+    #endif      
             }
           
           // Start temperature conversion
@@ -968,28 +970,13 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             if (cycleCountForDatalogging >= datalogPeriodInMainsCycles && firstcycle==false) 
             {
               cycleCountForDatalogging = 0;
-              for (int i=0; i<no_of_channels; i++) 
-              {
-                copyOf_sumPA_CT[i] = sumPA_CT[i]; 
-                copyOf_sumPB_CT[i] = sumPB_CT[i]; 
-                sumPA_CT[i] = 0;
-                sumPB_CT[i] = 0;
-                copyOf_sumIsquared_CT[i] = sumIsquared_CT[i]; 
-                sumIsquared_CT[i] = 0;
-                copyOf_cumI_deltas[i] = cumI_deltas_CT[i];
-                cumI_deltas_CT[i] = 0;
-              }
-              copyOf_cumV_deltas = cumV_deltas;
-              copyOf_sum_Vsquared = sum_Vsquared;
-              sum_Vsquared = 0;
-              cumV_deltas = 0;
-              copyOf_sampleSetsDuringThisDatalogPeriod = sampleSetsDuringThisDatalogPeriod;
-              sampleSetsDuringThisDatalogPeriod = 0;
+
+              accumSwap(&coll, &proc);
+              
     #ifdef INTEGRITY
               copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
               lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif
-              
               datalogEventPending = true;           
             }
           } // end of processing that is specific to the first Vsample in each +ve half cycle   
@@ -1030,28 +1017,14 @@ void EmonLibCM_allGeneralProcessing_withinISR()
             lowestNoOfSampleSetsPerMainsCycle = 999;
         #endif          
                           
-        cycleCountForDatalogging = 0;    
-        for (int i=0; i<no_of_channels; i++) 
-        {
-            copyOf_sumPA_CT[i] = 0;
-            copyOf_sumPB_CT[i] = 0;
-            sumPA_CT[i] = 0;
-            sumPB_CT[i] = 0;
-            copyOf_sumIsquared_CT[i] = sumIsquared_CT[i]; 
-            sumIsquared_CT[i] = 0;
-            copyOf_cumI_deltas[i] = cumI_deltas_CT[i];
-            cumI_deltas_CT[i] = 0;
-        }
-        copyOf_sum_Vsquared = sum_Vsquared;
-        sum_Vsquared = 0;
-        copyOf_cumV_deltas = cumV_deltas;
-        cumV_deltas = 0;
-        copyOf_sampleSetsDuringThisDatalogPeriod = sampleSetsDuringThisDatalogPeriod;
-        sampleSetsDuringThisDatalogPeriod = 0;
+        cycleCountForDatalogging = 0;
+        
+        accumSwap(&coll, &proc);
+        
 #ifdef INTEGRITY
         copyOf_lowestNoOfSampleSetsPerMainsCycle = lowestNoOfSampleSetsPerMainsCycle; // (for diags only)
         // lowestNoOfSampleSetsPerMainsCycle = 999;
-#endif        
+#endif       
         datalogEventPending = true;
 
         // Stops the sampling at the end of the cycle if EmonLibCM_Stop() has been called
@@ -1076,7 +1049,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
 // when the polarity status of each voltage sample is checked. 
 // 
 void EmonLibCM_interrupt()  
-{                                         
+{                 
   int rawSample;
   static unsigned char sample_index = 0;
   unsigned char next = 0;
@@ -1095,6 +1068,12 @@ void EmonLibCM_interrupt()
 #else
   rawSample = ADC;
 #endif
+
+  bool skip_isr = false;  
+  if (onewire_active) {
+    skip_isr = true;
+  }
+
   next = sample_index + 2;
   if (next>no_of_channels)                 // no_of_channels = count of Current channels in use. Voltage channel (0) is always read, so total is no_of_channels + 1
       next -= no_of_channels+1;
@@ -1104,7 +1083,7 @@ void EmonLibCM_interrupt()
 #else  
   ADMUX = ADCRef + ADC_Sequence[next];     // set up the next-but-one conversion
 #endif
-
+  if (!skip_isr) {
 #ifdef SAMPPIN
     PORTA.OUT &=~PIN7_bm;
 #endif
@@ -1151,14 +1130,15 @@ void EmonLibCM_interrupt()
 #ifdef INTEGRITY
       sampleSetsDuringThisMainsCycle++; 
 #endif
-      sampleSetsDuringThisDatalogPeriod++;      
+      coll->sampleSetsDuringThisDatalogPeriod++;      
       samplesDuringThisCycle++;
       //
       // for the Vrms calculation 
-      sum_Vsquared += ((long)sampleV_minusDC * sampleV_minusDC);     // cumulative V^2 (V_ADC x V_ADC)
+      coll->sum_Vsquared += ((long)sampleV_minusDC * sampleV_minusDC);     // cumulative V^2 (V_ADC x V_ADC)
       //
       // store items for later use
-      cumV_deltas += sampleV_minusDC;                                // for use with offset removal
+      coll->cumV_deltas += sampleV_minusDC;                                // for use with offset removal
+      
 
       polarityConfirmedOfLastSampleV = polarityConfirmed;            // for identification of half cycle boundaries
 #ifdef SAMPPIN
@@ -1197,19 +1177,20 @@ void EmonLibCM_interrupt()
       {
         ChannelInUse[sample_index-1] = true;
        
+        coll->sum_channel[sample_index-1] += lastRawSample[sample_index-1];
         // Offset removal for current is the same as for the voltage.
-      
+       
         lastRawSample[sample_index-1] -= (ADC_Counts >> 1);                              // remove nominal offset (a small offset will remain)
        
         sampleI_minusDC = lastRawSample[sample_index-1];
               
         // calculate the "partial real powers" in this sample pair and add to the accumulated sums - fine d.c. offsets are still present
-        sumPA_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power A
-        sumPB_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power B
+        coll->sumPA_CT[sample_index-1] += (long)sampleI_minusDC * lastSampleV_minusDC;         // cumulative power A
+        coll->sumPB_CT[sample_index-1] += (long)sampleI_minusDC * sampleV_minusDC;             // cumulative power B
           
         // for Irms calculation 
-        sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
-        cumI_deltas_CT[sample_index-1] += sampleI_minusDC;                               // for use with offset removal
+        coll->sumIsquared_CT[sample_index-1] += (long)sampleI_minusDC * sampleI_minusDC;       // this has the fine d.c. offset still present
+        coll->cumI_deltas_CT[sample_index-1] += sampleI_minusDC;                               // for use with offset removal
 
       }
       else
@@ -1219,6 +1200,7 @@ void EmonLibCM_interrupt()
 #ifdef SAMPPIN      
       PORTA.OUT &=~PIN7_bm;
 #endif
+  }
   }
   
   sample_index++; // advance the control flag
@@ -1232,7 +1214,110 @@ void EmonLibCM_interrupt()
 *
 *
 ***************************************************************************************************/
+uint8_t onewire_reset(void)
+{
+	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
+	uint8_t r;
+	uint8_t retries = 125;
 
+	// noInterrupts();
+	DIRECT_MODE_INPUT(reg, mask);
+	// interrupts();
+	// wait until the wire is high... just in case
+	do {
+		if (--retries == 0) return 0;
+		delayMicroseconds(2);
+	} while ( !DIRECT_READ(reg, mask));
+
+	//noInterrupts();
+	DIRECT_WRITE_LOW(reg, mask);
+	DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+	//interrupts();
+	delayMicroseconds(480);
+	
+	//noInterrupts();
+	onewire_active = true;
+	DIRECT_MODE_INPUT(reg, mask);	// allow it to float
+	delayMicroseconds(70);
+	r = !DIRECT_READ(reg, mask);
+	//interrupts();
+	onewire_active = false;
+	delayMicroseconds(410);
+	return r;
+}
+
+void onewire_write_bit(uint8_t v)
+{
+	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
+
+	if (v & 1) {
+		//noInterrupts();
+		onewire_active = true;
+		DIRECT_WRITE_LOW(reg, mask);
+		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+		delayMicroseconds(10);
+		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
+		//interrupts();
+		onewire_active = false;
+		delayMicroseconds(55);
+	} else {
+		//noInterrupts();
+		onewire_active = true;
+		DIRECT_WRITE_LOW(reg, mask);
+		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+		delayMicroseconds(60);
+		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
+		onewire_active = false;
+		//interrupts();
+		delayMicroseconds(5);
+	}
+}
+
+void onewire_write(uint8_t v, uint8_t power = 0) {
+  uint8_t bitMask;
+
+  for (bitMask = 0x01; bitMask; bitMask <<= 1) {
+	  onewire_write_bit( (bitMask & v)?1:0);
+  }
+  if (!power) {
+	  //noInterrupts();
+	  DIRECT_MODE_INPUT(baseReg, bitmask);
+	  DIRECT_WRITE_LOW(baseReg, bitmask);
+	  //interrupts();
+  }
+}
+
+uint8_t onewire_read_bit(void)
+{
+	IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
+	uint8_t r;
+
+	// noInterrupts();
+	onewire_active = true;
+	DIRECT_MODE_OUTPUT(reg, mask);
+	DIRECT_WRITE_LOW(reg, mask);
+	delayMicroseconds(3);
+	DIRECT_MODE_INPUT(reg, mask);	// let pin float, pull up will raise
+	delayMicroseconds(10);
+	r = DIRECT_READ(reg, mask);
+	// interrupts();
+	onewire_active = false;
+	delayMicroseconds(53);
+	return r;
+}
+
+uint8_t onewire_read() {
+    uint8_t bitMask;
+    uint8_t r = 0;
+
+    for (bitMask = 0x01; bitMask; bitMask <<= 1) {
+	if ( onewire_read_bit()) r |= bitMask;
+    }
+    return r;
+}
 
 void EmonLibCM_setTemperatureDataPin(byte _dataPin)
 {
@@ -1308,6 +1393,8 @@ void EmonLibCM_TemperatureEnable(bool _enable)
     }
 
     oneWire.begin(W1Pin);                               // In case W1Pin has changed.
+    bitmask = PIN_TO_BITMASK(W1Pin);
+	  baseReg = PIN_TO_BASEREG(W1Pin);
 
     if (temperatureEnabled = _enable)
     {
@@ -1345,14 +1432,14 @@ void EmonLibCM_TemperatureEnable(bool _enable)
         if (temperatureSensors[0][0] != DS18B20SIG)     // not a signature of a DS18B20, so not a pre-existing array - search for sensors
             while ((j < numSensors) && (oneWire.search(temperatureSensors[j]))) 
                 j++;
-        oneWire.reset();                                // write resolution to scratchpad 
-        oneWire.write(SKIP_ROM);
-        oneWire.write(WRITE_SCRATCHPAD);
+        onewire_reset();                                // write resolution to scratchpad 
+        onewire_write(SKIP_ROM);
+        onewire_write(WRITE_SCRATCHPAD);
         for(int i=0; i<3; i++)
-            oneWire.write(scratchpad[i]);
-        oneWire.reset();                                // copy to EEPROM 
-        oneWire.write(SKIP_ROM);
-        oneWire.write(COPY_SCRATCHPAD, true);
+            onewire_write(scratchpad[i]);
+        onewire_reset();                                // copy to EEPROM 
+        onewire_write(SKIP_ROM);
+        onewire_write(COPY_SCRATCHPAD, true);
         delay(20);                                      // required by DS18B20
     }
     else                                                // make sure power is turned off
@@ -1424,9 +1511,11 @@ void convertTemperatures(void)
             pinMode(DS18B20_PWR, OUTPUT);  
             digitalWrite(DS18B20_PWR, HIGH); 
         }
-        oneWire.reset();
-        oneWire.write(SKIP_ROM);
-        oneWire.write(CONVERT_TEMPERATURE, true); 
+        
+        onewire_reset();
+        onewire_write(SKIP_ROM);
+        onewire_write(CONVERT_TEMPERATURE, true);
+         
     }        // start conversion - all sensors    
 }
 
@@ -1440,21 +1529,22 @@ void retrieveTemperatures(void)
             byte buf[9];
             int result;
             if ((datalog_period_in_seconds < 0.2)                      // not enough time to get a reading
-                || !oneWire.reset()
+                || !onewire_reset()
                 || !temperatureSensors[j][0])                          // invalid address
             {
                 temperatures[j] = BAD_TEMPERATURE;
                 continue;
             }            
             else
-            {
-                oneWire.write(MATCH_ROM);
+            {   
+                onewire_write(MATCH_ROM);
                 for(int i=0; i<8; i++) 
-                    oneWire.write(temperatureSensors[j][i]);
-                oneWire.write(READ_SCRATCHPAD);
+                    onewire_write(temperatureSensors[j][i]);
+                onewire_write(READ_SCRATCHPAD);
                 for(int i=0; i<9; i++) 
                     buf[i] = oneWire.read();
             }
+            
 
             if(oneWire.crc8(buf,8)==buf[8])
             {
@@ -1505,6 +1595,7 @@ float EmonLibCM_getTemperature(char sensorNumber)
         return temp/100.0;                                      // 300 series error codes are already set
     return (temp/100.0);
 }
+
 
 
 /**************************************************************************************************
