@@ -17,14 +17,20 @@
 //  Release for testing 4/1/2017
 //
 
-// Version 3.0.6 29/11/2022   Slow down sample rate to DIV32 (39.3 us) improved zero power level
-// Version 3.0.5 22/11/2022   Fix for ADCDuration needs to be double
-// Version 3.0.4 21/11/2022   Option to return channel mean value
-// Version 3.0.3 05/10/2022   Fix online configuration
-// Version 3.0.2 20/08/2022   6 channel support
-// Version 3.0.1 07/07/2022   SAMP PIN lower level IO 
 // Version 3.0.0 20/04/2022   AVR-DB branch
-
+// Version 3.0.1 07/07/2022   SAMP PIN lower level IO 
+// Version 3.0.2 20/08/2022   6 channel support
+// Version 3.0.3 05/10/2022   Fix online configuration
+// Version 3.0.4 21/11/2022   Option to return channel mean value
+// Version 3.0.5 22/11/2022   Fix for ADCDuration needs to be double
+// Version 3.0.6 29/11/2022   Slow down sample rate to DIV32 (39.3 us) improved zero power level
+// Version 3.0.7 03/12/2022   Option to fetch analog channel mean
+// 
+// Version 3.0.8 25/04/2023   Skip ISR processing with flag if precise one-wire timing required
+//                            this reduces DS18B20 temperature sensing interference 
+//                            on the continuos sampling electricity monitoring
+//                            Update includes more efficient data structure swap
+//                            which also eliminates an ISR over-run
 
 // Version 2.0  21/11/2018
 // Version 2.01  3/12/2018  No change.
