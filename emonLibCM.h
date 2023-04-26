@@ -31,6 +31,7 @@
 //                            on the continuos sampling electricity monitoring
 //                            Update includes more efficient data structure swap
 //                            which also eliminates an ISR over-run
+// Version 3.0.9 26/04/2023   Use memset_v rather than memset to get rid of compiler errors (from emonLibDB)
 
 // Version 2.0  21/11/2018
 // Version 2.01  3/12/2018  No change.

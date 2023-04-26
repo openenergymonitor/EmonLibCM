@@ -65,6 +65,8 @@ Version 3.0 includes AVR-DB specific changes:
 //                            on the continuos sampling electricity monitoring
 //                            Update includes more efficient data structure swap
 //                            which also eliminates an ISR over-run
+// Version 3.0.9 26/04/2023   Use memset_v rather than memset to get rid of compiler errors (from emonLibDB)
+
 ```
 
 Version 2.0 corrected some errors generated when converting from the original sketch, and incorporates improved handling of phase/timing compensation and improved removal of the d.c. bias. There are no other major changes from the version that has been tested by @TrystanLea since early 2017.

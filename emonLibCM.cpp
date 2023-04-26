@@ -59,7 +59,8 @@
 //                            this reduces DS18B20 temperature sensing interference 
 //                            on the continuos sampling electricity monitoring
 //                            Update includes more efficient data structure swap
-//                            which also eliminates an ISR over-run
+//                            which also eliminates an ISR over-run (from emonLibDB)
+// Version 3.0.9 26/04/2023   Use memset_v rather than memset to get rid of compiler errors (from emonLibDB)
 
 // #include "WProgram.h" un-comment for use on older versions of Arduino IDE
 
@@ -237,6 +238,15 @@ double assumedVrms = 240.0;
 
 unsigned int datalogPeriodInMainsCycles;
 unsigned long ADCsamples_per_datalog_period;
+
+void memset_v(volatile void *s, size_t n)
+{
+  // Zero a block of memory
+  // Usage: memset_v(&mymemory, sizeof(mymemory));
+  volatile uint8_t *q = (volatile uint8_t *)s;
+  while (n-- > 0)
+    *q++ = 0;
+}
 
 // accumulators & counters for use by the ISR
 struct Accum
@@ -818,7 +828,7 @@ void EmonLibCM_get_readings()
         residualEnergy_CT[i] = energyNow - (wattHoursRecent * 3600.0);                          // fp for accuracy
     }
     
-    memset(proc, 0, sizeof(Accum));
+    memset_v(proc, sizeof(Accum));
    
     //  Retrieve the temperatures, which should be stored inside each sensor
     if (temperatureEnabled)
@@ -961,7 +971,7 @@ void EmonLibCM_allGeneralProcessing_withinISR()
                 firstcycle = false;
                 cycleCountForDatalogging = 0;
                 
-                memset(coll, 0, sizeof(Accum));
+                memset_v(coll, sizeof(Accum));
     #ifdef INTEGRITY
                 lowestNoOfSampleSetsPerMainsCycle = 999;
     #endif      
